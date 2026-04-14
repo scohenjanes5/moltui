@@ -9,3 +9,9 @@ Used the [Kitty graphics protocol](https://sw.kovidgoyal.net/kitty/graphics-prot
 The project now uses braille-based text rendering exclusively, which works in any terminal (including over SSH).
 
 The file is self-contained: it includes the `KittyViewer` class and all helper functions (`_kitty_send`, `_kitty_delete`, `_get_terminal_pixel_size`, `_get_temp_path`).
+
+## renderer.py
+
+Rich/Textual Strip-based software renderer, removed on 2026-04-14.
+
+Rendered molecules using Rich `Segment` and Textual `Strip` objects with per-character RGB styling. Replaced by `image_renderer.py` which renders to a pixel buffer that is then converted to braille characters in the Textual widget.
