@@ -1,13 +1,17 @@
+import atexit
 import base64
 import fcntl
-import io
 import os
 import select
 import struct
 import sys
+import tempfile
 import termios
 import tty
+import zlib
 from pathlib import Path
+
+import numpy as np
 
 from .elements import Molecule
 from .image_renderer import ImageRenderer, rotation_matrix
@@ -30,22 +34,35 @@ def _get_terminal_pixel_size() -> tuple[int, int]:
     return cols * 8, rows * 16
 
 
-def _kitty_send(img, image_id: int = 1) -> None:
-    """Send a PIL Image to the terminal via kitty graphics protocol."""
-    buf = io.BytesIO()
-    img.save(buf, format="PNG")
-    data = base64.standard_b64encode(buf.getvalue()).decode()
+_TEMP_PATH: str | None = None
 
-    chunks = [data[i : i + 4096] for i in range(0, len(data), 4096)]
-    out = sys.stdout
-    for idx, chunk in enumerate(chunks):
-        is_last = idx == len(chunks) - 1
-        m = 0 if is_last else 1
-        if idx == 0:
-            out.write(f"\033_Ga=T,f=100,i={image_id},q=2,m={m};{chunk}\033\\")
-        else:
-            out.write(f"\033_Gm={m};{chunk}\033\\")
-    out.flush()
+
+def _get_temp_path() -> str:
+    global _TEMP_PATH
+    if _TEMP_PATH is None:
+        fd, _TEMP_PATH = tempfile.mkstemp(prefix="moltui_")
+        os.close(fd)
+        atexit.register(lambda: os.unlink(_TEMP_PATH) if os.path.exists(_TEMP_PATH) else None)
+    return _TEMP_PATH
+
+
+def _kitty_send(pixels: np.ndarray, image_id: int = 1) -> None:
+    """Send an RGB pixel array to the terminal via kitty graphics protocol.
+
+    Uses temp file + zlib compression for speed (no PNG encode, no base64 chunking).
+    """
+    h, w = pixels.shape[:2]
+    compressed = zlib.compress(pixels.tobytes(), level=1)
+
+    path = _get_temp_path()
+    with open(path, "wb") as f:
+        f.write(compressed)
+
+    path_b64 = base64.standard_b64encode(path.encode()).decode()
+    sys.stdout.write(
+        f"\033_Ga=T,f=24,s={w},v={h},t=f,i={image_id},o=z,q=2;{path_b64}\033\\"
+    )
+    sys.stdout.flush()
 
 
 def _kitty_delete(image_id: int | None = None) -> None:
@@ -186,7 +203,7 @@ class KittyViewer:
 
         # Send image at top-left (same ID replaces previous atomically)
         sys.stdout.write("\033[H")  # cursor home
-        _kitty_send(renderer.to_pil_image(), image_id=1)
+        _kitty_send(renderer.pixels, image_id=1)
 
         # Draw status bar on last row
         sys.stdout.write(f"\033[{rows};1H")  # move to last line

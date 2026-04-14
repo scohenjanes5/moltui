@@ -131,67 +131,97 @@ class ImageRenderer:
         if length < 1.0:
             return
 
-        ux, uy = dx / length, dy / length
-        nx, ny = -uy, ux  # perpendicular
-
+        nx, ny = -dy / length, dx / length  # perpendicular
         half_w = max(1.0, pr)
         steps = int(length) + 1
 
-        for i in range(steps + 1):
-            t = i / steps if steps > 0 else 0
-            cx = sx1 + dx * t
-            cy = sy1 + dy * t
-            cz = sz1 + (sz2 - sz1) * t
-            color = color1 if t < 0.5 else color2
+        # Vectorize: all (step, offset) combinations at once
+        hw = int(half_w + 1)
+        ts = np.linspace(0, 1, steps + 1)
+        offsets = np.arange(-hw, hw + 1, dtype=np.float64)
+        d_norm = offsets / half_w
+        off_mask = np.abs(d_norm) <= 1.0
+        offsets = offsets[off_mask]
+        d_norm = d_norm[off_mask]
 
-            hw = int(half_w + 1)
-            offsets = np.arange(-hw, hw + 1, dtype=np.float64)
-            d = offsets / half_w
-            valid_mask = np.abs(d) <= 1.0
-            offsets = offsets[valid_mask]
-            d = d[valid_mask]
+        # Outer product: (n_steps, n_offsets)
+        cxs = sx1 + dx * ts
+        cys = sy1 + dy * ts
+        czs = sz1 + (sz2 - sz1) * ts
 
-            pxs = np.round(cx + nx * offsets).astype(int)
-            pys = np.round(cy + ny * offsets).astype(int)
+        # All pixel positions: (n_steps, n_offsets)
+        all_px = np.round(cxs[:, None] + nx * offsets[None, :]).astype(int)
+        all_py = np.round(cys[:, None] + ny * offsets[None, :]).astype(int)
 
-            bounds = (
-                (pxs >= 0) & (pxs < self.width) & (pys >= 0) & (pys < self.height)
-            )
-            pxs, pys, d = pxs[bounds], pys[bounds], d[bounds]
+        # Cylinder shading (only varies with offset, not step)
+        cyl_nz = np.sqrt(1.0 - d_norm * d_norm)
+        cyl_nx_v = nx * d_norm
+        cyl_ny_v = -ny * d_norm
+        norm_len = np.sqrt(cyl_nx_v**2 + cyl_ny_v**2 + cyl_nz**2) + 1e-10
+        cyl_nx_v /= norm_len
+        cyl_ny_v /= norm_len
+        cyl_nz /= norm_len
+        diffuse = np.maximum(
+            0.0,
+            cyl_nx_v * self.light_dir[0]
+            + cyl_ny_v * self.light_dir[1]
+            + cyl_nz * self.light_dir[2],
+        )
+        intensity = np.minimum(1.0, self.ambient + (1.0 - self.ambient) * diffuse)
+        # Broadcast to (n_steps, n_offsets)
+        pz = czs[:, None] - self.bond_radius * cyl_nz[None, :]
+        intensity_2d = np.broadcast_to(intensity[None, :], pz.shape)
 
-            if len(pxs) == 0:
-                continue
+        # Flatten everything
+        flat_px = all_px.ravel()
+        flat_py = all_py.ravel()
+        flat_pz = pz.ravel()
+        flat_int = intensity_2d.ravel()
 
-            cyl_nz = np.sqrt(1.0 - d * d)
-            cyl_nx = nx * d
-            cyl_ny = -ny * d
+        # Color: first half = color1, second half = color2
+        n_steps = len(ts)
+        n_off = len(offsets)
+        step_idx = np.repeat(np.arange(n_steps), n_off)
+        half = n_steps // 2
+        is_first_half = step_idx <= half
 
-            norm_len = np.sqrt(cyl_nx**2 + cyl_ny**2 + cyl_nz**2) + 1e-10
-            cyl_nx /= norm_len
-            cyl_ny /= norm_len
-            cyl_nz /= norm_len
+        # Bounds check
+        valid = (
+            (flat_px >= 0)
+            & (flat_px < self.width)
+            & (flat_py >= 0)
+            & (flat_py < self.height)
+        )
+        flat_px, flat_py, flat_pz, flat_int, is_first_half = (
+            flat_px[valid],
+            flat_py[valid],
+            flat_pz[valid],
+            flat_int[valid],
+            is_first_half[valid],
+        )
 
-            diffuse = np.maximum(
-                0.0,
-                cyl_nx * self.light_dir[0]
-                + cyl_ny * self.light_dir[1]
-                + cyl_nz * self.light_dir[2],
-            )
-            intensity = np.minimum(1.0, self.ambient + (1.0 - self.ambient) * diffuse)
-            pz = cz - self.bond_radius * cyl_nz
+        if len(flat_px) == 0:
+            return
 
-            z_vals = self.z_buf[pys, pxs]
-            z_valid = pz < z_vals
+        # Z-buffer test
+        z_current = self.z_buf[flat_py, flat_px]
+        z_pass = flat_pz < z_current
+        flat_px = flat_px[z_pass]
+        flat_py = flat_py[z_pass]
+        flat_pz = flat_pz[z_pass]
+        flat_int = flat_int[z_pass]
+        is_first_half = is_first_half[z_pass]
 
-            idxs_y = pys[z_valid]
-            idxs_x = pxs[z_valid]
-            ints = intensity[z_valid]
+        if len(flat_px) == 0:
+            return
 
-            self.z_buf[idxs_y, idxs_x] = pz[z_valid]
-            for c in range(3):
-                self.pixels[idxs_y, idxs_x, c] = np.minimum(
-                    255, (color[c] * ints)
-                ).astype(np.uint8)
+        self.z_buf[flat_py, flat_px] = flat_pz
+
+        c1 = np.array(color1, dtype=np.float64)
+        c2 = np.array(color2, dtype=np.float64)
+        colors = np.where(is_first_half[:, None], c1[None, :], c2[None, :])
+        shaded = np.minimum(255, colors * flat_int[:, None]).astype(np.uint8)
+        self.pixels[flat_py, flat_px] = shaded
 
     def render_isosurface(
         self,
