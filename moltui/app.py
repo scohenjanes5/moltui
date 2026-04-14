@@ -167,10 +167,6 @@ class MoltuiApp(App):
     """
 
     BINDINGS = [
-        Binding("escape", "close_panel", "Close panel", show=False),
-        Binding("n", "panel_next", show=False),
-        Binding("p", "panel_prev", show=False),
-        Binding("q", "quit", "Quit"),
         Binding("k,up", "rotate_up", "Rot up", show=False),
         Binding("j,down", "rotate_down", "Rot down", show=False),
         Binding("h,left", "rotate_left", "Rot left", show=False),
@@ -182,15 +178,19 @@ class MoltuiApp(App):
         Binding("plus,equal_sign", "zoom_in", show=False),
         Binding("minus", "zoom_out", show=False),
         Binding("t", "toggle_mode", "Pan/Rot"),
-        Binding("c", "center", "Center"),
+        Binding("c", "center", "Center", show=False),
+        Binding("r", "reset_view", "Reset"),
         Binding("b", "toggle_bonds", "Bonds"),
         Binding("i", "toggle_bg", "Bg"),
         Binding("o", "toggle_orbitals", "Orbitals"),
-        Binding("r", "reset_view", "Reset"),
+        Binding("escape", "close_panel", "Close panel", show=False),
+        Binding("q", "quit", "Quit"),
         Binding("g", "toggle_geometry", "Geom"),
         Binding("m", "toggle_mo_panel", "MOs"),
         Binding("right_square_bracket", "next_mo", "MO]", show=False),
         Binding("left_square_bracket", "prev_mo", "[MO", show=False),
+        Binding("n", "panel_next", "Next"),
+        Binding("p", "panel_prev", "Prev"),
     ]
 
     def __init__(
@@ -235,6 +235,21 @@ class MoltuiApp(App):
                 current_mo=self.current_mo,
             )
         view.focus()
+
+    def _panel_is_open(self) -> bool:
+        return (
+            self.query_one(GeometryPanel).has_class("visible")
+            or self.query_one(MOPanel).has_class("visible")
+        )
+
+    def check_action(self, action: str, parameters: tuple[object, ...]) -> bool | None:
+        if action in ("toggle_orbitals", "toggle_mo_panel", "next_mo", "prev_mo"):
+            if self.molden_data is None and not self._isosurfaces:
+                return False
+        if action in ("panel_next", "panel_prev"):
+            if not self._panel_is_open():
+                return False
+        return True
 
     def _title_text(self) -> str:
         parts = [Path(self.filepath).name]

@@ -10,9 +10,9 @@ from .elements import Molecule
 class GeometryPanel(Widget):
 
     BINDINGS = [
-        Binding("tab", "next_tab", "Next tab", show=False),
+        Binding("tab", "next_tab", "Tab", show=True),
         Binding("shift+tab", "prev_tab", "Prev tab", show=False),
-        Binding("s", "toggle_sort", "Sort", show=False),
+        Binding("s", "toggle_sort", "Sort", show=True),
     ]
     DEFAULT_CSS = """
     GeometryPanel {
@@ -103,7 +103,7 @@ class GeometryPanel(Widget):
         table.add_columns("Atom 1", "Atom 2", "Length (\u00c5)")
         for i, j, dist in bonds:
             table.add_row(
-                self._atom_label(i), self._atom_label(j), f"{dist:.3f}",
+                self._atom_label(i), self._atom_label(j), f"{dist:.4f}",
                 key=f"{i}-{j}",
             )
 
@@ -117,7 +117,7 @@ class GeometryPanel(Widget):
         for i, j, k, angle in angles:
             table.add_row(
                 self._atom_label(i), self._atom_label(j), self._atom_label(k),
-                f"{angle:.1f}",
+                f"{angle:.3f}",
                 key=f"{i}-{j}-{k}",
             )
 
@@ -132,7 +132,7 @@ class GeometryPanel(Widget):
             table.add_row(
                 self._atom_label(i), self._atom_label(j),
                 self._atom_label(k), self._atom_label(l),
-                f"{angle:.1f}",
+                f"{angle:.3f}",
                 key=f"{i}-{j}-{k}-{l}",
             )
 
