@@ -1,6 +1,7 @@
 from dataclasses import dataclass
 
 import numpy as np
+from scipy.ndimage import zoom
 from skimage.measure import marching_cubes
 
 from .parsers import BOHR_TO_ANGSTROM, CubeData
@@ -21,9 +22,13 @@ def extract_isosurfaces(
     cube_data: CubeData,
     isovalue: float = 0.05,
     step: int = 1,
+    upsample: int = 1,
 ) -> list[IsosurfaceMesh]:
     data = cube_data.data[::step, ::step, ::step]
     spacing_bohr = step * np.linalg.norm(cube_data.axes, axis=1)
+    if upsample > 1:
+        data = zoom(data, upsample, order=3)
+        spacing_bohr = spacing_bohr / upsample
     origin_ang = cube_data.origin * BOHR_TO_ANGSTROM
     spacing_ang = spacing_bohr * BOHR_TO_ANGSTROM
 

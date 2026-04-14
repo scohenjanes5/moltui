@@ -3,6 +3,7 @@ import base64
 import fcntl
 import os
 import select
+import signal
 import struct
 import sys
 import tempfile
@@ -16,7 +17,7 @@ import numpy as np
 from .elements import Molecule
 from .image_renderer import render_scene, rotation_matrix
 from .isosurface import IsosurfaceMesh, extract_isosurfaces
-from .parsers import load_molecule, parse_cube_data
+from .parsers import CubeData, load_molecule, parse_cube_data
 from .renderer import Renderer
 
 
@@ -109,12 +110,14 @@ class TextViewer:
         isosurfaces: list[IsosurfaceMesh] | None = None,
         molden_data=None,
         current_mo: int = 0,
+        cube_data: CubeData | None = None,
     ):
         self.molecule = molecule
         self.filepath = filepath
         self.isosurfaces = isosurfaces or []
         self.molden_data = molden_data
         self.current_mo = current_mo
+        self.cube_data = cube_data
         self.rot_x = 0.5
         self.rot_y = 0.0
         self.rot_z = 0.0
@@ -127,7 +130,14 @@ class TextViewer:
     def run(self) -> None:
         fd = sys.stdin.fileno()
         old_settings = termios.tcgetattr(fd)
+        self._resize_pending = False
+        old_sigwinch = signal.getsignal(signal.SIGWINCH)
+
+        def _on_resize(signum, frame):
+            self._resize_pending = True
+
         try:
+            signal.signal(signal.SIGWINCH, _on_resize)
             tty.setcbreak(fd)
             sys.stdout.write("\033[?25l")  # hide cursor
             sys.stdout.write("\033[2J")  # clear screen
@@ -136,6 +146,12 @@ class TextViewer:
             self._render()
 
             while True:
+                ready, _, _ = select.select([sys.stdin], [], [], 0.1)
+                if self._resize_pending:
+                    self._resize_pending = False
+                    self._render()
+                if not ready:
+                    continue
                 key = _read_key()
                 if not self._handle_key(key):
                     break
@@ -144,6 +160,7 @@ class TextViewer:
                     if not self._handle_key(key):
                         return
         finally:
+            signal.signal(signal.SIGWINCH, old_sigwinch)
             sys.stdout.write("\033[?25h")  # show cursor
             sys.stdout.write("\033[2J\033[H")  # clear screen
             sys.stdout.flush()
@@ -330,12 +347,14 @@ class KittyViewer:
         isosurfaces: list[IsosurfaceMesh] | None = None,
         molden_data=None,
         current_mo: int = 0,
+        cube_data: CubeData | None = None,
     ):
         self.molecule = molecule
         self.filepath = filepath
         self.isosurfaces = isosurfaces or []
         self.molden_data = molden_data
         self.current_mo = current_mo
+        self.cube_data = cube_data
 
         self.rot_x = 0.5
         self.rot_y = 0.0
@@ -349,7 +368,14 @@ class KittyViewer:
     def run(self) -> None:
         fd = sys.stdin.fileno()
         old_settings = termios.tcgetattr(fd)
+        self._resize_pending = False
+        old_sigwinch = signal.getsignal(signal.SIGWINCH)
+
+        def _on_resize(signum, frame):
+            self._resize_pending = True
+
         try:
+            signal.signal(signal.SIGWINCH, _on_resize)
             tty.setcbreak(fd)
             sys.stdout.write("\033[?25l")  # hide cursor
             sys.stdout.write("\033[2J")  # clear screen
@@ -358,6 +384,12 @@ class KittyViewer:
             self._render()
 
             while True:
+                ready, _, _ = select.select([sys.stdin], [], [], 0.1)
+                if self._resize_pending:
+                    self._resize_pending = False
+                    self._render()
+                if not ready:
+                    continue
                 key = _read_key()
                 if not self._handle_key(key):
                     break
@@ -367,6 +399,7 @@ class KittyViewer:
                     if not self._handle_key(key):
                         return
         finally:
+            signal.signal(signal.SIGWINCH, old_sigwinch)
             _kitty_delete()
             sys.stdout.write("\033[?25h")  # show cursor
             sys.stdout.write("\033[2J\033[H")  # clear screen
