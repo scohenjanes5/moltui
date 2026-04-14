@@ -14,6 +14,7 @@ from textual.widgets import DataTable, Footer, Header
 from .elements import Molecule
 from .geometry_panel import GeometryPanel
 from .image_renderer import render_scene, rotation_matrix
+from .mo_panel import MOPanel
 from .isosurface import IsosurfaceMesh, extract_isosurfaces
 from .parsers import CubeData, load_molecule, parse_cube_data
 
@@ -166,6 +167,9 @@ class MoltuiApp(App):
     """
 
     BINDINGS = [
+        Binding("escape", "close_panel", "Close panel", show=False),
+        Binding("n", "panel_next", show=False),
+        Binding("p", "panel_prev", show=False),
         Binding("q", "quit", "Quit"),
         Binding("k,up", "rotate_up", "Rot up", show=False),
         Binding("j,down", "rotate_down", "Rot down", show=False),
@@ -184,6 +188,7 @@ class MoltuiApp(App):
         Binding("o", "toggle_orbitals", "Orbitals"),
         Binding("r", "reset_view", "Reset"),
         Binding("g", "toggle_geometry", "Geom"),
+        Binding("m", "toggle_mo_panel", "MOs"),
         Binding("right_square_bracket", "next_mo", "MO]", show=False),
         Binding("left_square_bracket", "prev_mo", "[MO", show=False),
     ]
@@ -211,6 +216,7 @@ class MoltuiApp(App):
         with Horizontal(id="main-content"):
             yield MoleculeView()
             yield GeometryPanel()
+            yield MOPanel()
         yield Footer()
 
     def on_mount(self) -> None:
@@ -218,6 +224,16 @@ class MoltuiApp(App):
         view.set_molecule(self.molecule, self._isosurfaces)
         panel = self.query_one(GeometryPanel)
         panel.set_molecule(self.molecule)
+        if self.molden_data is not None:
+            md = self.molden_data
+            mo_panel = self.query_one(MOPanel)
+            mo_panel.set_mo_data(
+                energies=md.mo_energies.tolist(),
+                occupations=md.mo_occupations.tolist(),
+                symmetries=md.mo_symmetries,
+                homo_idx=md.homo_idx,
+                current_mo=self.current_mo,
+            )
         view.focus()
 
     def _title_text(self) -> str:
@@ -345,21 +361,87 @@ class MoltuiApp(App):
             view.camera_distance = max(4.0, view.molecule.radius() * 3.0)
         view._invalidate_cache()
 
+    def _active_panel_table(self) -> DataTable | None:
+        """Return the focused DataTable in the currently visible panel, or None."""
+        for panel in [self.query_one(GeometryPanel), self.query_one(MOPanel)]:
+            if panel.has_class("visible"):
+                for dt in panel.query(DataTable):
+                    return dt
+        return None
+
+    def action_panel_next(self) -> None:
+        dt = self._active_panel_table()
+        if dt is not None:
+            dt.action_cursor_down()
+
+    def action_panel_prev(self) -> None:
+        dt = self._active_panel_table()
+        if dt is not None:
+            dt.action_cursor_up()
+
+    def action_close_panel(self) -> None:
+        geom = self.query_one(GeometryPanel)
+        mo = self.query_one(MOPanel)
+        if geom.has_class("visible") or mo.has_class("visible"):
+            self._close_panels()
+            view = self.query_one(MoleculeView)
+            view._invalidate_cache()
+            view.focus()
+
+    def _close_panels(self) -> None:
+        """Close all sidebar panels and reset their state."""
+        view = self.query_one(MoleculeView)
+        geom = self.query_one(GeometryPanel)
+        mo = self.query_one(MOPanel)
+        if geom.has_class("visible"):
+            geom.remove_class("visible")
+            view.highlighted_atoms = set()
+        if mo.has_class("visible"):
+            mo.remove_class("visible")
+
     def action_toggle_geometry(self) -> None:
         panel = self.query_one(GeometryPanel)
-        panel.toggle_class("visible")
+        was_visible = panel.has_class("visible")
+        self._close_panels()
         view = self.query_one(MoleculeView)
-        if panel.has_class("visible"):
-            # Focus active tab's DataTable and emit its current highlight
+        if not was_visible:
+            panel.add_class("visible")
             for dt in panel.query(DataTable):
                 dt.focus()
                 panel._emit_current_highlight(dt)
                 break
-            view._invalidate_cache()
         else:
-            view.highlighted_atoms = set()
-            view._invalidate_cache()
             view.focus()
+        view._invalidate_cache()
+
+    def action_toggle_mo_panel(self) -> None:
+        if self.molden_data is None:
+            self.notify("No MO data (molden files only)", timeout=2)
+            return
+        mo_panel = self.query_one(MOPanel)
+        was_visible = mo_panel.has_class("visible")
+        self._close_panels()
+        view = self.query_one(MoleculeView)
+        if not was_visible:
+            mo_panel.add_class("visible")
+            for dt in mo_panel.query(DataTable):
+                dt.focus()
+                mo_panel.emit_current_highlight(dt)
+                break
+        else:
+            view.focus()
+        view._invalidate_cache()
+
+    def on_mopanel_moselected(self, event: MOPanel.MOSelected) -> None:
+        if self.molden_data is None:
+            return
+        mo_idx = event.mo_index
+        if mo_idx == self.current_mo:
+            return
+        self.current_mo = mo_idx
+        self._switch_mo()
+        mo_panel = self.query_one(MOPanel)
+        mo_panel._current_mo = mo_idx
 
     def on_geometry_panel_highlight_atoms(self, event: GeometryPanel.HighlightAtoms) -> None:
         view = self.query_one(MoleculeView)
