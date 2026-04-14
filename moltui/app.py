@@ -4,13 +4,16 @@ from pathlib import Path
 from textual.app import App, ComposeResult
 from textual.binding import Binding
 from textual.reactive import reactive
-from textual.strip import Strip
 from textual.widget import Widget
 from textual.widgets import Header, Static
+from textual_image.widget import Image as ImageWidget
 
 from .elements import Molecule
+from .image_renderer import ImageRenderer, rotation_matrix
 from .parsers import load_molecule
-from .renderer import Renderer, rotation_matrix
+
+PIXELS_PER_CELL_X = 8
+PIXELS_PER_CELL_Y = 16
 
 
 class MoleculeViewport(Widget):
@@ -26,23 +29,35 @@ class MoleculeViewport(Widget):
     rot_z = reactive(0.0)
     camera_distance = reactive(5.0)
     show_bonds = reactive(True)
+    dark_bg = reactive(True)
 
     def __init__(self, molecule: Molecule, **kwargs):
         super().__init__(**kwargs)
         self.molecule = molecule
-        self._renderer: Renderer | None = None
-        self._render_size: tuple[int, int] = (0, 0)
+        self._image_widget = ImageWidget(None, id="mol-image")
         mol_radius = molecule.radius()
         self.camera_distance = max(4.0, mol_radius * 3.0)
+
+    def compose(self) -> ComposeResult:
+        yield self._image_widget
+
+    def on_mount(self) -> None:
+        self._rebuild()
+
+    def on_resize(self) -> None:
+        self._rebuild()
 
     def _rebuild(self) -> None:
         width = self.size.width
         height = self.size.height
         if width < 2 or height < 2:
-            self._renderer = None
             return
 
-        renderer = Renderer(width, height)
+        px_w = width * PIXELS_PER_CELL_X
+        px_h = height * PIXELS_PER_CELL_Y
+
+        bg = (0, 0, 0) if self.dark_bg else (255, 255, 255)
+        renderer = ImageRenderer(px_w, px_h, bg_color=bg)
         rot = rotation_matrix(self.rot_x, self.rot_y, self.rot_z)
 
         mol = self.molecule
@@ -50,35 +65,25 @@ class MoleculeViewport(Widget):
             mol = Molecule(atoms=mol.atoms, bonds=[])
 
         renderer.render_molecule(mol, rot, self.camera_distance)
-        self._renderer = renderer
-        self._render_size = (width, height)
-
-    def render_line(self, y: int) -> Strip:
-        w, h = self.size.width, self.size.height
-        if self._renderer is None or self._render_size != (w, h):
-            self._rebuild()
-        if self._renderer is None:
-            return Strip.blank(self.size.width)
-        return self._renderer.get_strip(y)
-
-    def _invalidate(self) -> None:
-        self._renderer = None
-        self.refresh()
+        self._image_widget.image = renderer.to_pil_image()
 
     def watch_rot_x(self) -> None:
-        self._invalidate()
+        self._rebuild()
 
     def watch_rot_y(self) -> None:
-        self._invalidate()
+        self._rebuild()
 
     def watch_rot_z(self) -> None:
-        self._invalidate()
+        self._rebuild()
 
     def watch_camera_distance(self) -> None:
-        self._invalidate()
+        self._rebuild()
 
     def watch_show_bonds(self) -> None:
-        self._invalidate()
+        self._rebuild()
+
+    def watch_dark_bg(self) -> None:
+        self._rebuild()
 
 
 class StatusBar(Static):
@@ -98,6 +103,10 @@ class MolTUI(App):
     Screen {
         background: #000000;
     }
+    #mol-image {
+        width: 1fr;
+        height: 1fr;
+    }
     """
 
     TITLE = "moltui"
@@ -114,6 +123,7 @@ class MolTUI(App):
         Binding("minus", "zoom_out", "Zoom Out", show=False),
         Binding("r", "reset_view", "Reset"),
         Binding("b", "toggle_bonds", "Bonds"),
+        Binding("i", "toggle_bg", "Background"),
     ]
 
     def __init__(self, molecule: Molecule, filepath: str = "", **kwargs):
@@ -126,7 +136,7 @@ class MolTUI(App):
         yield MoleculeViewport(self.molecule, id="viewport")
         n = len(self.molecule.atoms)
         b = len(self.molecule.bonds)
-        info = f" {Path(self.filepath).name} | {n} atoms, {b} bonds | ←↑↓→ rotate | +/- zoom | b bonds | r reset | q quit"
+        info = f" {Path(self.filepath).name} | {n} atoms, {b} bonds | ←↑↓→ rotate | +/- zoom | b bonds | i bg | r reset | q quit"
         yield StatusBar(info)
 
     @property
@@ -166,6 +176,9 @@ class MolTUI(App):
 
     def action_toggle_bonds(self) -> None:
         self.viewport.show_bonds = not self.viewport.show_bonds
+
+    def action_toggle_bg(self) -> None:
+        self.viewport.dark_bg = not self.viewport.dark_bg
 
 
 def run():
