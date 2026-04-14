@@ -106,15 +106,22 @@ class TextViewer:
         self,
         molecule: Molecule,
         filepath: str = "",
+        isosurfaces: list[IsosurfaceMesh] | None = None,
+        molden_data=None,
+        current_mo: int = 0,
     ):
         self.molecule = molecule
         self.filepath = filepath
+        self.isosurfaces = isosurfaces or []
+        self.molden_data = molden_data
+        self.current_mo = current_mo
         self.rot_x = 0.5
         self.rot_y = 0.0
         self.rot_z = 0.0
         mol_radius = molecule.radius()
         self.camera_distance = max(4.0, mol_radius * 3.0)
         self.show_bonds = True
+        self.show_orbitals = True
         self.dark_bg = True
 
     def run(self) -> None:
@@ -173,6 +180,12 @@ class TextViewer:
             self.show_bonds = not self.show_bonds
         elif key == "i":
             self.dark_bg = not self.dark_bg
+        elif key == "o":
+            self.show_orbitals = not self.show_orbitals
+        elif key == "]":
+            self._next_mo()
+        elif key == "[":
+            self._prev_mo()
         else:
             needs_render = False
 
@@ -180,31 +193,75 @@ class TextViewer:
             self._render()
         return True
 
+    def _next_mo(self) -> None:
+        if self.molden_data is None:
+            return
+        if self.current_mo < self.molden_data.n_mos - 1:
+            self.current_mo += 1
+            self._switch_mo()
+
+    def _prev_mo(self) -> None:
+        if self.molden_data is None:
+            return
+        if self.current_mo > 0:
+            self.current_mo -= 1
+            self._switch_mo()
+
+    def _switch_mo(self) -> None:
+        from .molden import evaluate_mo
+
+        cube_data = evaluate_mo(self.molden_data, self.current_mo)
+        self.isosurfaces = extract_isosurfaces(cube_data)
+
     def _render(self) -> None:
         cols, rows = os.get_terminal_size()
-        render_rows = rows - 1  # leave 1 row for status
+        display_rows = rows - 1  # leave 1 row for status
+        # Render at 2x vertical resolution, then combine row pairs with half-blocks
+        pixel_rows = display_rows * 2
 
-        renderer = Renderer(cols, render_rows)
+        renderer = Renderer(cols, pixel_rows)
         rot = rotation_matrix(self.rot_x, self.rot_y, self.rot_z)
 
         mol = self.molecule
         if not self.show_bonds:
             mol = Molecule(atoms=mol.atoms, bonds=[])
 
-        renderer.render_molecule(mol, rot, self.camera_distance)
+        isos = self.isosurfaces if self.show_orbitals else None
+        renderer.render_molecule(mol, rot, self.camera_distance, isosurfaces=isos)
 
-        bg = "0;0;0" if self.dark_bg else "255;255;255"
-        sys.stdout.write("\033[H")  # cursor home
-        for y in range(render_rows):
-            sys.stdout.write(f"\033[{y + 1};1H")
+        bg_default = (0, 0, 0) if self.dark_bg else (255, 255, 255)
+        buf = ["\033[H"]  # cursor home
+        for row in range(display_rows):
+            top_y = row * 2
+            bot_y = row * 2 + 1
+            buf.append(f"\033[{row + 1};1H")
+            prev_fg = None
+            prev_bg = None
             for x in range(cols):
-                bg_col = renderer.bg_buf[y][x]
-                if bg_col is not None:
-                    sys.stdout.write(
-                        f"\033[48;2;{bg_col[0]};{bg_col[1]};{bg_col[2]}m \033[0m"
-                    )
+                # Top pixel = foreground color of ▀, bottom pixel = background color
+                fg = renderer.bg_buf[top_y][x] or bg_default
+                bg = renderer.bg_buf[bot_y][x] or bg_default
+                # Minimize escape codes by only emitting changes
+                if fg == bg:
+                    # Both halves same color — just use a space with bg
+                    if bg != prev_bg or prev_fg is not None:
+                        buf.append(f"\033[0;48;2;{bg[0]};{bg[1]};{bg[2]}m")
+                        prev_bg = bg
+                        prev_fg = None
+                    buf.append(" ")
                 else:
-                    sys.stdout.write(f"\033[48;2;{bg}m \033[0m")
+                    parts = []
+                    if fg != prev_fg:
+                        parts.append(f"38;2;{fg[0]};{fg[1]};{fg[2]}")
+                        prev_fg = fg
+                    if bg != prev_bg:
+                        parts.append(f"48;2;{bg[0]};{bg[1]};{bg[2]}")
+                        prev_bg = bg
+                    if parts:
+                        buf.append(f"\033[{';'.join(parts)}m")
+                    buf.append("\u2580")  # ▀ upper half block
+        buf.append("\033[0m")
+        sys.stdout.write("".join(buf))
 
         # Status bar
         sys.stdout.write(f"\033[{rows};1H")
@@ -214,9 +271,29 @@ class TextViewer:
         parts = [
             Path(self.filepath).name,
             f"{n} atoms, {b} bonds",
-            "arrows rot", "+/- zoom", "b bonds", "i bg",
-            "r reset", "q quit",
         ]
+        if self.molden_data is not None:
+            md = self.molden_data
+            energy = md.mo_energies[self.current_mo]
+            occ = md.mo_occupations[self.current_mo]
+            sym = (
+                md.mo_symmetries[self.current_mo]
+                if self.current_mo < len(md.mo_symmetries)
+                else ""
+            )
+            homo_label = ""
+            if self.current_mo == md.homo_idx:
+                homo_label = " HOMO"
+            elif self.current_mo == md.homo_idx + 1:
+                homo_label = " LUMO"
+            parts.append(
+                f"MO {self.current_mo + 1}/{md.n_mos} {sym}{homo_label} E={energy:.4f} occ={occ:.1f}"
+            )
+            parts.append("[/] MO")
+        parts += ["arrows rot", "+/- zoom", "b bonds", "i bg"]
+        if self.isosurfaces:
+            parts.append("o orb")
+        parts += ["r reset", "q quit"]
         status = " " + " | ".join(parts)
         sys.stdout.write(status[:cols].ljust(cols))
         sys.stdout.write("\033[0m")
@@ -453,6 +530,9 @@ def run():
         viewer = TextViewer(
             molecule=molecule,
             filepath=filepath,
+            isosurfaces=isosurfaces,
+            molden_data=molden_data,
+            current_mo=current_mo,
         )
     else:
         viewer = KittyViewer(

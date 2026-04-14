@@ -6,6 +6,7 @@ from rich.style import Style
 from textual.strip import Strip
 
 from .elements import Molecule
+from .isosurface import IsosurfaceMesh
 
 
 def rotation_matrix(rx: float, ry: float, rz: float) -> np.ndarray:
@@ -173,17 +174,91 @@ class Renderer:
                 shaded = self._shade_color(color, intensity)
                 self._set_pixel(px, py, pz, " ", (0, 0, 0), bg=shaded)
 
+    def render_isosurface(
+        self,
+        mesh: IsosurfaceMesh,
+        rot: np.ndarray,
+        camera_distance: float,
+        centroid: np.ndarray,
+    ):
+        if len(mesh.faces) == 0:
+            return
+
+        transformed = (rot @ (mesh.vertices - centroid).T).T
+        transformed[:, 2] += camera_distance
+        rot_normals = (rot @ mesh.normals.T).T
+
+        for face in mesh.faces:
+            v0, v1, v2 = transformed[face]
+            n0, n1, n2 = rot_normals[face]
+
+            s0x, s0y, s0z = self._project(v0)
+            s1x, s1y, s1z = self._project(v1)
+            s2x, s2y, s2z = self._project(v2)
+            if math.isnan(s0x) or math.isnan(s1x) or math.isnan(s2x):
+                continue
+
+            # Backface cull
+            cross = (s1x - s0x) * (s2y - s0y) - (s1y - s0y) * (s2x - s0x)
+            if cross <= 0:
+                continue
+
+            x_min = max(0, int(min(s0x, s1x, s2x)))
+            x_max = min(self.width - 1, int(max(s0x, s1x, s2x)) + 1)
+            y_min = max(0, int(min(s0y, s1y, s2y)))
+            y_max = min(self.height - 1, int(max(s0y, s1y, s2y)) + 1)
+
+            denom = (s1y - s2y) * (s0x - s2x) + (s2x - s1x) * (s0y - s2y)
+            if abs(denom) < 1e-10:
+                continue
+            inv_d = 1.0 / denom
+
+            for py in range(y_min, y_max + 1):
+                for px in range(x_min, x_max + 1):
+                    dpx = px - s2x
+                    dpy = py - s2y
+                    w0 = ((s1y - s2y) * dpx + (s2x - s1x) * dpy) * inv_d
+                    w1 = ((s2y - s0y) * dpx + (s0x - s2x) * dpy) * inv_d
+                    w2 = 1.0 - w0 - w1
+                    if w0 < 0 or w1 < 0 or w2 < 0:
+                        continue
+
+                    pz = w0 * s0z + w1 * s1z + w2 * s2z
+                    if pz >= self.z_buf[py][px]:
+                        continue
+
+                    nx = w0 * n0[0] + w1 * n1[0] + w2 * n2[0]
+                    ny = w0 * n0[1] + w1 * n1[1] + w2 * n2[1]
+                    nz = w0 * n0[2] + w1 * n1[2] + w2 * n2[2]
+                    nl = math.sqrt(nx * nx + ny * ny + nz * nz) + 1e-10
+                    nx /= nl; ny /= nl; nz /= nl
+
+                    # Flip normals facing away from camera
+                    if nz > 0:
+                        nx, ny, nz = -nx, -ny, -nz
+
+                    diffuse = max(0.0, nx * self.light_dir[0] + ny * self.light_dir[1] + nz * self.light_dir[2])
+                    intensity = min(1.0, self.ambient + (1.0 - self.ambient) * diffuse)
+                    shaded = self._shade_color(mesh.color, intensity)
+                    self._set_pixel(px, py, pz, " ", (0, 0, 0), bg=shaded)
+
     def render_molecule(
         self,
         molecule: Molecule,
         rot: np.ndarray,
         camera_distance: float,
+        isosurfaces: list[IsosurfaceMesh] | None = None,
     ):
         self.clear()
         if not molecule.atoms:
             return
 
         centroid = molecule.center()
+
+        if isosurfaces:
+            for mesh in isosurfaces:
+                self.render_isosurface(mesh, rot, camera_distance, centroid)
+
         transformed = []
         for atom in molecule.atoms:
             pos = rot @ (atom.position - centroid)
