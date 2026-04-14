@@ -14,7 +14,7 @@ from pathlib import Path
 import numpy as np
 
 from .elements import Molecule
-from .image_renderer import ImageRenderer, rotation_matrix
+from .image_renderer import render_scene, rotation_matrix
 from .isosurface import IsosurfaceMesh, extract_isosurfaces
 from .parsers import load_molecule, parse_cube_data
 
@@ -46,10 +46,13 @@ def _get_temp_path() -> str:
     return _TEMP_PATH
 
 
-def _kitty_send(pixels: np.ndarray, image_id: int = 1) -> None:
+def _kitty_send(
+    pixels: np.ndarray, image_id: int = 1, cols: int = 0, rows: int = 0
+) -> None:
     """Send an RGB pixel array to the terminal via kitty graphics protocol.
 
     Uses temp file + zlib compression for speed (no PNG encode, no base64 chunking).
+    cols/rows: display size in terminal cells (kitty scales the image).
     """
     h, w = pixels.shape[:2]
     compressed = zlib.compress(pixels.tobytes(), level=1)
@@ -59,8 +62,11 @@ def _kitty_send(pixels: np.ndarray, image_id: int = 1) -> None:
         f.write(compressed)
 
     path_b64 = base64.standard_b64encode(path.encode()).decode()
+    placement = ""
+    if cols > 0 and rows > 0:
+        placement = f",c={cols},r={rows}"
     sys.stdout.write(
-        f"\033_Ga=T,f=24,s={w},v={h},t=f,i={image_id},o=z,q=2;{path_b64}\033\\"
+        f"\033_Ga=T,f=24,s={w},v={h},t=f,i={image_id},o=z,q=2{placement};{path_b64}\033\\"
     )
     sys.stdout.flush()
 
@@ -131,6 +137,11 @@ class KittyViewer:
                 key = _read_key()
                 if not self._handle_key(key):
                     break
+                # Debounce: drain any queued keys before rendering
+                while select.select([sys.stdin], [], [], 0)[0]:
+                    key = _read_key()
+                    if not self._handle_key(key):
+                        return
         finally:
             _kitty_delete()
             sys.stdout.write("\033[?25h")  # show cursor
@@ -183,6 +194,9 @@ class KittyViewer:
             self._render()
         return True
 
+    MAX_RENDER_W = 800
+    MAX_RENDER_H = 600
+
     def _render(self) -> None:
         cols, rows = os.get_terminal_size()
         px_w, px_h = _get_terminal_pixel_size()
@@ -190,8 +204,17 @@ class KittyViewer:
         status_px = px_h // rows if rows > 0 else 16
         px_h -= status_px
 
+        # Cap resolution — kitty scales the image to fit the terminal
+        aspect = px_w / max(px_h, 1)
+        if px_w > self.MAX_RENDER_W or px_h > self.MAX_RENDER_H:
+            if aspect > self.MAX_RENDER_W / self.MAX_RENDER_H:
+                px_w = self.MAX_RENDER_W
+                px_h = int(px_w / aspect)
+            else:
+                px_h = self.MAX_RENDER_H
+                px_w = int(px_h * aspect)
+
         bg = (0, 0, 0) if self.dark_bg else (255, 255, 255)
-        renderer = ImageRenderer(px_w, px_h, bg_color=bg)
         rot = rotation_matrix(self.rot_x, self.rot_y, self.rot_z)
 
         mol = self.molecule
@@ -199,11 +222,14 @@ class KittyViewer:
             mol = Molecule(atoms=mol.atoms, bonds=[])
 
         isos = self.isosurfaces if self.show_orbitals else None
-        renderer.render_molecule(mol, rot, self.camera_distance, isosurfaces=isos)
+        pixels = render_scene(
+            px_w, px_h, mol, rot, self.camera_distance,
+            bg_color=bg, isosurfaces=isos, ssaa=2,
+        )
 
-        # Send image at top-left (same ID replaces previous atomically)
+        # Send image at top-left, scaled to fill terminal
         sys.stdout.write("\033[H")  # cursor home
-        _kitty_send(renderer.pixels, image_id=1)
+        _kitty_send(pixels, image_id=1, cols=cols, rows=rows - 1)
 
         # Draw status bar on last row
         sys.stdout.write(f"\033[{rows};1H")  # move to last line

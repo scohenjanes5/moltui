@@ -20,7 +20,7 @@ class IsosurfaceMesh:
 def extract_isosurfaces(
     cube_data: CubeData,
     isovalue: float = 0.05,
-    step: int = 2,
+    step: int = 1,
 ) -> list[IsosurfaceMesh]:
     data = cube_data.data[::step, ::step, ::step]
     spacing_bohr = step * np.linalg.norm(cube_data.axes, axis=1)
