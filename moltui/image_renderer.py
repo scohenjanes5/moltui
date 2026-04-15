@@ -1,7 +1,6 @@
 import math
 
 import numpy as np
-from PIL import Image
 
 from .elements import Molecule
 from .isosurface import IsosurfaceMesh
@@ -497,9 +496,6 @@ class ImageRenderer:
             radius = atom.element.covalent_radius * self.atom_scale
             color = self._highlight_color() if has_hl and i in hl else atom.element.cpk_color
             self.render_sphere(transformed[i], radius, color)
-
-    def to_pil_image(self) -> Image.Image:
-        return Image.fromarray(self.pixels, "RGB")
 
 
 def render_scene(
