@@ -451,6 +451,7 @@ class MoltuiApp(App):
         view = self.query_one(MoleculeView)
         if not was_visible:
             mo_panel.add_class("visible")
+            mo_panel.select_mo(self.current_mo)
             for dt in mo_panel.query(DataTable):
                 dt.focus()
                 mo_panel.emit_current_highlight(dt)

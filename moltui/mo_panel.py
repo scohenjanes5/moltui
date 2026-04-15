@@ -86,6 +86,17 @@ class MOPanel(Widget):
 
         self._populating = False
 
+    def select_mo(self, mo_idx: int) -> None:
+        """Move the cursor to the given MO index."""
+        self._current_mo = mo_idx
+        table = self.query_one("#mo-table", DataTable)
+        for row, (mi, *_) in enumerate(self._mo_data):
+            if mi == mo_idx:
+                self._populating = True
+                table.move_cursor(row=row)
+                self._populating = False
+                return
+
     def emit_current_highlight(self, dt: DataTable) -> None:
         if not self.has_class("visible") or dt.row_count == 0:
             return
