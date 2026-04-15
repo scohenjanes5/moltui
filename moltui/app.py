@@ -219,6 +219,8 @@ class MoltuiApp(App):
         self._isosurfaces = isosurfaces or []
         self.molden_data = molden_data
         self.current_mo = current_mo
+        self._mo_switch_timer = None
+        self._mo_pending = False
         self.title = self._title_text()
 
     def compose(self) -> ComposeResult:
@@ -463,7 +465,7 @@ class MoltuiApp(App):
         if mo_idx == self.current_mo:
             return
         self.current_mo = mo_idx
-        self._switch_mo()
+        self._debounced_switch_mo()
         mo_panel = self.query_one(MOPanel)
         mo_panel._current_mo = mo_idx
 
@@ -477,18 +479,34 @@ class MoltuiApp(App):
             return
         if self.current_mo < self.molden_data.n_mos - 1:
             self.current_mo += 1
-            self._switch_mo()
+            self._debounced_switch_mo()
 
     def action_prev_mo(self) -> None:
         if self.molden_data is None:
             return
         if self.current_mo > 0:
             self.current_mo -= 1
+            self._debounced_switch_mo()
+
+    def _debounced_switch_mo(self) -> None:
+        self._update_title()
+        if self._mo_switch_timer is not None:
+            # Already cooling down — just mark pending
+            self._mo_pending = True
+            return
+        # Fire immediately
+        self._switch_mo()
+
+    def _mo_cooldown_done(self) -> None:
+        self._mo_switch_timer = None
+        if self._mo_pending:
+            self._mo_pending = False
             self._switch_mo()
 
     def _switch_mo(self) -> None:
         from .molden import evaluate_mo
 
+        self._mo_switch_timer = self.set_timer(0.3, self._mo_cooldown_done)
         cube_data = evaluate_mo(self.molden_data, self.current_mo)
         self._isosurfaces = extract_isosurfaces(cube_data)
         view = self.query_one(MoleculeView)
