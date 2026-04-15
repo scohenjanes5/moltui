@@ -30,7 +30,7 @@ class ImageRenderer:
         self.fov = 1.5
         self.light_dir = np.array([0.4, 0.7, -0.6])
         self.light_dir /= np.linalg.norm(self.light_dir)
-        self.ambient = 0.2
+        self.ambient = 0.35
         self.diffuse_strength = 0.6
         self.specular_strength = 0.4
         self.shininess = 32.0
@@ -507,8 +507,12 @@ def render_scene(
     ssaa: int = 2,
     pan: tuple[float, float] = (0.0, 0.0),
     highlighted_atoms: set[int] | None = None,
-) -> np.ndarray:
-    """Render with supersampling anti-aliasing. Returns (height, width, 3) uint8."""
+) -> tuple[np.ndarray, np.ndarray]:
+    """Render with supersampling anti-aliasing.
+
+    Returns (pixels, hit_mask) where pixels is (height, width, 3) uint8
+    and hit_mask is (height, width) bool indicating which pixels were drawn.
+    """
     r = ImageRenderer(width * ssaa, height * ssaa, bg_color=bg_color)
     r.render_molecule(
         molecule,
@@ -518,8 +522,10 @@ def render_scene(
         pan=pan,
         highlighted_atoms=highlighted_atoms,
     )
+    hit = np.isfinite(r.z_buf)
     if ssaa == 1:
-        return r.pixels
+        return r.pixels, hit
     # Box-filter downsample
     downsampled = r.pixels.reshape(height, ssaa, width, ssaa, 3).mean(axis=(1, 3)).astype(np.uint8)
-    return downsampled
+    hit_down = hit.reshape(height, ssaa, width, ssaa).any(axis=(1, 3))
+    return downsampled, hit_down

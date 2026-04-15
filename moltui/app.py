@@ -105,7 +105,7 @@ class MoleculeView(Widget):
 
         isos = self.isosurfaces if self.show_orbitals else None
         hl = self.highlighted_atoms if self.highlighted_atoms else None
-        pixels = render_scene(
+        pixels, hit = render_scene(
             px_w,
             px_h,
             mol,
@@ -118,12 +118,8 @@ class MoleculeView(Widget):
             highlighted_atoms=hl,
         )
 
-        bg_arr = np.array(bg, dtype=np.uint8)
         blocks = pixels.reshape(rows, 4, cols, 2, 3)
-        is_on = np.any(blocks != bg_arr, axis=4)
-
-        braille_bits = np.where(is_on, _BRAILLE_MAP[None, :, None, :], 0)
-        codepoints = 0x2800 + braille_bits.sum(axis=(1, 3)).astype(np.uint32)
+        is_on = hit.reshape(rows, 4, cols, 2)
 
         on_count = is_on.sum(axis=(1, 3))
         on_mask = is_on[:, :, :, :, None]
@@ -131,6 +127,14 @@ class MoleculeView(Widget):
         safe_count = np.maximum(on_count, 1)[:, :, None]
         avg_fg = (color_sum / safe_count).astype(np.uint8)
 
+        if self.dark_bg:
+            braille_bits = np.where(is_on, _BRAILLE_MAP[None, :, None, :], 0)
+        else:
+            # Light mode: invert braille so atom color becomes cell background
+            braille_bits = np.where(~is_on, _BRAILLE_MAP[None, :, None, :], 0)
+        codepoints = 0x2800 + braille_bits.sum(axis=(1, 3)).astype(np.uint32)
+
+        any_hit = on_count > 0
         bg_style = Style(bgcolor=f"rgb({bg[0]},{bg[1]},{bg[2]})")
 
         strips = []
@@ -140,16 +144,34 @@ class MoleculeView(Widget):
             run_chars: list[str] = []
             for x in range(cols):
                 cp = int(codepoints[row, x])
-                if cp == 0x2800:
-                    style = bg_style
-                    ch = " "
+                if self.dark_bg:
+                    if cp == 0x2800:
+                        style = bg_style
+                        ch = " "
+                    else:
+                        fg = avg_fg[row, x]
+                        style = Style(
+                            color=f"rgb({int(fg[0])},{int(fg[1])},{int(fg[2])})",
+                            bgcolor=f"rgb({bg[0]},{bg[1]},{bg[2]})",
+                        )
+                        ch = chr(cp)
                 else:
-                    fg = avg_fg[row, x]
-                    style = Style(
-                        color=f"rgb({int(fg[0])},{int(fg[1])},{int(fg[2])})",
-                        bgcolor=f"rgb({bg[0]},{bg[1]},{bg[2]})",
-                    )
-                    ch = chr(cp)
+                    if not any_hit[row, x]:
+                        style = bg_style
+                        ch = " "
+                    else:
+                        fc = avg_fg[row, x]
+                        if cp == 0x2800:
+                            # Fully covered — solid atom color
+                            style = Style(bgcolor=f"rgb({int(fc[0])},{int(fc[1])},{int(fc[2])})")
+                            ch = " "
+                        else:
+                            # Edge — white dots for gaps, atom color bg
+                            style = Style(
+                                color=f"rgb({bg[0]},{bg[1]},{bg[2]})",
+                                bgcolor=f"rgb({int(fc[0])},{int(fc[1])},{int(fc[2])})",
+                            )
+                            ch = chr(cp)
 
                 if style == prev_style:
                     run_chars.append(ch)
