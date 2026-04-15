@@ -32,7 +32,9 @@ Repository = "https://github.com/kszenes/moltui"
 Issues = "https://github.com/kszenes/moltui/issues"
 
 [project.optional-dependencies]
-molden = ["pyscf>=2.0", "psutil"]
+molden = ["psutil"]
+test = ["pytest>=7.0"]
+test-pyscf = ["pytest>=7.0", "pyscf>=2.0"]
 
 [build-system]
 requires = ["hatchling"]
