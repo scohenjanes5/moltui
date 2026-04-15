@@ -470,6 +470,7 @@ class MoltuiApp(App):
         view = self.query_one(MoleculeView)
         if not was_visible:
             panel.add_class("visible")
+            view.show_orbitals = False
             for dt in panel.query(DataTable):
                 dt.focus()
                 panel._emit_current_highlight(dt)
@@ -488,6 +489,7 @@ class MoltuiApp(App):
         view = self.query_one(MoleculeView)
         if not was_visible:
             mo_panel.add_class("visible")
+            view.show_orbitals = True
             mo_panel.select_mo(self.current_mo)
             for dt in mo_panel.query(DataTable):
                 dt.focus()
