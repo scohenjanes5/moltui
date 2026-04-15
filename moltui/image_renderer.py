@@ -149,7 +149,7 @@ class ImageRenderer:
 
         nx, ny = -dy / length, dx / length  # perpendicular
         half_w = max(1.0, pr)
-        steps = int(length) + 1
+        steps = int(length * 2) + 1
 
         # Vectorize: all (step, offset) combinations at once
         hw = int(half_w + 1)
