@@ -489,34 +489,30 @@ class MoltuiApp(App):
         view._invalidate_cache()
 
     def on_mopanel_moselected(self, event: MOPanel.MOSelected) -> None:
-        if self.molden_data is None:
-            return
-        mo_idx = event.mo_index
-        if mo_idx == self.current_mo:
-            return
-        self.current_mo = mo_idx
-        self._debounced_switch_mo()
-        mo_panel = self.query_one(MOPanel)
-        mo_panel._current_mo = mo_idx
+        self._set_current_mo(event.mo_index)
 
     def on_geometry_panel_highlight_atoms(self, event: GeometryPanel.HighlightAtoms) -> None:
         view = self.query_one(MoleculeView)
         view.highlighted_atoms = set(event.atom_indices)
         view._invalidate_cache()
 
-    def action_next_mo(self) -> None:
+    def _set_current_mo(self, mo_idx: int) -> None:
+        """Single entry point for all MO changes."""
         if self.molden_data is None:
             return
-        if self.current_mo < self.molden_data.n_mos - 1:
-            self.current_mo += 1
-            self._debounced_switch_mo()
+        mo_idx = max(0, min(mo_idx, self.molden_data.n_mos - 1))
+        if mo_idx == self.current_mo:
+            return
+        self.current_mo = mo_idx
+        self._debounced_switch_mo()
+        mo_panel = self.query_one(MOPanel)
+        mo_panel.select_mo(mo_idx)
+
+    def action_next_mo(self) -> None:
+        self._set_current_mo(self.current_mo + 1)
 
     def action_prev_mo(self) -> None:
-        if self.molden_data is None:
-            return
-        if self.current_mo > 0:
-            self.current_mo -= 1
-            self._debounced_switch_mo()
+        self._set_current_mo(self.current_mo - 1)
 
     def _debounced_switch_mo(self) -> None:
         self._update_title()
