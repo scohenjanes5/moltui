@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import sys
 from pathlib import Path
 
@@ -33,6 +34,13 @@ _BRAILLE_MAP = np.array(
     ],
     dtype=np.uint8,
 )
+
+
+def _compute_mo_isosurfaces(molden_data, mo_idx: int) -> list[IsosurfaceMesh]:
+    from .molden import evaluate_mo
+
+    cube_data = evaluate_mo(molden_data, mo_idx)
+    return extract_isosurfaces(cube_data)
 
 
 class MoleculeView(Widget):
@@ -246,6 +254,7 @@ class MoltuiApp(App):
         self.current_mo = current_mo
         self._mo_switch_timer = None
         self._mo_pending = False
+        self._mo_switch_task: asyncio.Task[None] | None = None
         self.title = self._title_text()
 
     def compose(self) -> ComposeResult:
@@ -516,11 +525,10 @@ class MoltuiApp(App):
 
     def _debounced_switch_mo(self) -> None:
         self._update_title()
-        if self._mo_switch_timer is not None:
-            # Already cooling down — just mark pending
+        if self._mo_switch_timer is not None or self._mo_switch_task is not None:
+            # Cooling down or already computing: remember there is a newer request.
             self._mo_pending = True
             return
-        # Fire immediately
         self._switch_mo()
 
     def _mo_cooldown_done(self) -> None:
@@ -530,15 +538,26 @@ class MoltuiApp(App):
             self._switch_mo()
 
     def _switch_mo(self) -> None:
-        from .molden import evaluate_mo
+        self._mo_switch_task = asyncio.create_task(self._switch_mo_async(self.current_mo))
 
-        self._mo_switch_timer = self.set_timer(0.3, self._mo_cooldown_done)
-        cube_data = evaluate_mo(self.molden_data, self.current_mo)
-        self._isosurfaces = extract_isosurfaces(cube_data)
-        view = self.query_one(MoleculeView)
-        view.isosurfaces = self._isosurfaces
-        view._invalidate_cache()
-        self._update_title()
+    async def _switch_mo_async(self, target_mo: int) -> None:
+        try:
+            if self.molden_data is None:
+                return
+            isosurfaces = await asyncio.to_thread(
+                _compute_mo_isosurfaces, self.molden_data, target_mo
+            )
+            # If user moved again while this was computing, skip stale frame.
+            if target_mo != self.current_mo:
+                return
+            self._isosurfaces = isosurfaces
+            view = self.query_one(MoleculeView)
+            view.isosurfaces = self._isosurfaces
+            view._invalidate_cache()
+            self._update_title()
+        finally:
+            self._mo_switch_task = None
+            self._mo_switch_timer = self.set_timer(0.3, self._mo_cooldown_done)
 
 
 def run():
