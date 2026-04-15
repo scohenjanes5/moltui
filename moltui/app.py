@@ -490,7 +490,7 @@ class MoltuiApp(App):
         if not was_visible:
             mo_panel.add_class("visible")
             view.show_orbitals = True
-            mo_panel.select_mo(self.current_mo)
+            mo_panel.select_mo(self.current_mo, center=True)
             for dt in mo_panel.query(DataTable):
                 dt.focus()
                 mo_panel.emit_current_highlight(dt)

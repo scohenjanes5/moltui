@@ -82,19 +82,30 @@ class MOPanel(Widget):
                 current_row = idx
 
         if table.row_count > 0:
-            table.move_cursor(row=current_row)
+            table.move_cursor(row=current_row, scroll=False)
+            # Center after layout is computed; size can be 0 during initial populate.
+            self.call_after_refresh(self._center_row, table, current_row)
 
         self._populating = False
 
-    def select_mo(self, mo_idx: int) -> None:
+    def _center_row(self, table: DataTable, row: int) -> None:
+        if table.row_count == 0:
+            return
+        viewport_rows = max(1, table.size.height - 1)  # account for header row
+        center_target = max(0, row - viewport_rows // 2)
+        table.scroll_to(y=center_target, animate=False, immediate=True)
+
+    def select_mo(self, mo_idx: int, *, center: bool = False) -> None:
         """Move the cursor to the given MO index."""
         self._current_mo = mo_idx
         table = self.query_one("#mo-table", DataTable)
         for row, (mi, *_) in enumerate(self._mo_data):
             if mi == mo_idx:
                 self._populating = True
-                table.move_cursor(row=row)
+                table.move_cursor(row=row, scroll=not center)
                 self._populating = False
+                if center:
+                    self.call_after_refresh(self._center_row, table, row)
                 return
 
     def emit_current_highlight(self, dt: DataTable) -> None:
