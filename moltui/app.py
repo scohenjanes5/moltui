@@ -9,7 +9,7 @@ from textual.binding import Binding
 from textual.containers import Horizontal
 from textual.strip import Strip
 from textual.widget import Widget
-from textual.widgets import DataTable, Footer, Header
+from textual.widgets import DataTable, Footer, Header, TabbedContent
 
 from .elements import Molecule
 from .geometry_panel import GeometryPanel
@@ -383,11 +383,17 @@ class MoltuiApp(App):
         view._invalidate_cache()
 
     def _active_panel_table(self) -> DataTable | None:
-        """Return the focused DataTable in the currently visible panel, or None."""
-        for panel in [self.query_one(GeometryPanel), self.query_one(MOPanel)]:
-            if panel.has_class("visible"):
-                for dt in panel.query(DataTable):
-                    return dt
+        """Return the DataTable in the currently visible panel's active tab."""
+        geom = self.query_one(GeometryPanel)
+        if geom.has_class("visible"):
+            tabs = geom.query_one(TabbedContent)
+            pane = tabs.get_pane(tabs.active)
+            for dt in pane.query(DataTable):
+                return dt
+        mo = self.query_one(MOPanel)
+        if mo.has_class("visible"):
+            for dt in mo.query(DataTable):
+                return dt
         return None
 
     def action_panel_next(self) -> None:
