@@ -1,7 +1,7 @@
 [project]
 name = "moltui"
 version = "0.1.0"
-description = "Terminal-based 3D molecular viewer with braille rendering"
+description = "Terminal-based 3D molecular viewer"
 readme = "README.md"
 license = "MIT"
 requires-python = ">=3.10"
