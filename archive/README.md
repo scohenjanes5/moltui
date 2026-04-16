@@ -15,3 +15,22 @@ The file is self-contained: it includes the `KittyViewer` class and all helper f
 Rich/Textual Strip-based software renderer, removed on 2026-04-14.
 
 Rendered molecules using Rich `Segment` and Textual `Strip` objects with per-character RGB styling. Replaced by `image_renderer.py` which renders to a pixel buffer that is then converted to braille characters in the Textual widget.
+
+## hq_export_recipe.py
+
+Archived reference implementation of the high-quality PNG export recipe:
+- renderer material/camera tuning for PNG output
+- artifact-resistant isosurface rasterization settings
+- adaptive high-resolution isosurface extraction settings for export
+
+Use this file as a stable "known-good" parameter source if HQ export needs to be rebuilt.
+
+## hq_isosurface_algorithms.py
+
+Archived mesh-processing helpers used in the HQ export pipeline:
+- Laplacian mesh smoothing
+- vertex normal recomputation from face geometry
+
+## HQ_EXPORT_QUALITY.md
+
+Practical guide for reproducing artifact-free, high-quality PNG exports from MolTUI, including recommended values and troubleshooting notes.

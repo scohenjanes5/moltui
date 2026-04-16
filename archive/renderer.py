@@ -166,9 +166,7 @@ class Renderer:
                 cyl_normal /= np.linalg.norm(cyl_normal) + 1e-10
 
                 diffuse = max(0.0, float(np.dot(cyl_normal, self.light_dir)))
-                intensity = min(
-                    1.0, self.ambient + (1.0 - self.ambient) * diffuse
-                )
+                intensity = min(1.0, self.ambient + (1.0 - self.ambient) * diffuse)
                 # Push cylinder surface slightly behind atom surface
                 pz = cz - self.bond_radius * cyl_nz
                 shaded = self._shade_color(color, intensity)
@@ -231,13 +229,18 @@ class Renderer:
                     ny = w0 * n0[1] + w1 * n1[1] + w2 * n2[1]
                     nz = w0 * n0[2] + w1 * n1[2] + w2 * n2[2]
                     nl = math.sqrt(nx * nx + ny * ny + nz * nz) + 1e-10
-                    nx /= nl; ny /= nl; nz /= nl
+                    nx /= nl
+                    ny /= nl
+                    nz /= nl
 
                     # Flip normals facing away from camera
                     if nz > 0:
                         nx, ny, nz = -nx, -ny, -nz
 
-                    diffuse = max(0.0, nx * self.light_dir[0] + ny * self.light_dir[1] + nz * self.light_dir[2])
+                    diffuse = max(
+                        0.0,
+                        nx * self.light_dir[0] + ny * self.light_dir[1] + nz * self.light_dir[2],
+                    )
                     intensity = min(1.0, self.ambient + (1.0 - self.ambient) * diffuse)
                     shaded = self._shade_color(mesh.color, intensity)
                     self._set_pixel(px, py, pz, " ", (0, 0, 0), bg=shaded)

@@ -35,9 +35,7 @@ from .parsers import CubeData
 def _get_terminal_pixel_size() -> tuple[int, int]:
     """Get terminal size in pixels via ioctl, fallback to estimate."""
     try:
-        result = fcntl.ioctl(
-            sys.stdout.fileno(), termios.TIOCGWINSZ, b"\0" * 8
-        )
+        result = fcntl.ioctl(sys.stdout.fileno(), termios.TIOCGWINSZ, b"\0" * 8)
         rows, cols, xpixel, ypixel = struct.unpack("HHHH", result)
         if xpixel > 0 and ypixel > 0:
             return xpixel, ypixel
@@ -59,9 +57,7 @@ def _get_temp_path() -> str:
     return _TEMP_PATH
 
 
-def _kitty_send(
-    pixels: np.ndarray, image_id: int = 1, cols: int = 0, rows: int = 0
-) -> None:
+def _kitty_send(pixels: np.ndarray, image_id: int = 1, cols: int = 0, rows: int = 0) -> None:
     """Send an RGB pixel array to the terminal via kitty graphics protocol.
 
     Uses temp file + zlib compression for speed (no PNG encode, no base64 chunking).
@@ -252,8 +248,14 @@ class KittyViewer:
 
         isos = self.isosurfaces if self.show_orbitals else None
         pixels = render_scene(
-            px_w, px_h, mol, rot, self.camera_distance,
-            bg_color=bg, isosurfaces=isos, ssaa=2,
+            px_w,
+            px_h,
+            mol,
+            rot,
+            self.camera_distance,
+            bg_color=bg,
+            isosurfaces=isos,
+            ssaa=2,
         )
 
         # Send image at top-left, scaled to fill terminal
@@ -280,18 +282,15 @@ class KittyViewer:
             energy = md.mo_energies[self.current_mo]
             occ = md.mo_occupations[self.current_mo]
             sym = (
-                md.mo_symmetries[self.current_mo]
-                if self.current_mo < len(md.mo_symmetries)
-                else ""
+                md.mo_symmetries[self.current_mo] if self.current_mo < len(md.mo_symmetries) else ""
             )
             homo_label = ""
             if self.current_mo == md.homo_idx:
                 homo_label = " HOMO"
             elif self.current_mo == md.homo_idx + 1:
                 homo_label = " LUMO"
-            parts.append(
-                f"MO {self.current_mo + 1}/{md.n_mos} {sym}{homo_label} E={energy:.4f} occ={occ:.1f}"
-            )
+            mo_str = f"MO {self.current_mo + 1}/{md.n_mos}"
+            parts.append(f"{mo_str} {sym}{homo_label} E={energy:.4f} occ={occ:.1f}")
             parts.append("[/] MO")
         parts += ["arrows rot", "+/- zoom", "b bonds", "i bg"]
         if self.isosurfaces:
