@@ -277,7 +277,7 @@ class MoltuiApp(App):
                 energies=md.mo_energies.tolist(),
                 occupations=md.mo_occupations.tolist(),
                 symmetries=md.mo_symmetries,
-                homo_idx=md.homo_idx,
+                spins=md.mo_spins,
                 current_mo=self.current_mo,
             )
         view.focus()
@@ -305,13 +305,14 @@ class MoltuiApp(App):
             sym = (
                 md.mo_symmetries[self.current_mo] if self.current_mo < len(md.mo_symmetries) else ""
             )
-            homo_label = ""
-            if self.current_mo == md.homo_idx:
-                homo_label = " HOMO"
-            elif self.current_mo == md.homo_idx + 1:
-                homo_label = " LUMO"
-            mo_str = f"MO {self.current_mo + 1}/{md.n_mos}"
-            parts.append(f"{mo_str} {sym}{homo_label} E={energy:.4f} occ={occ:.1f}")
+            spin_symbol = {"Alpha": "\u03b1", "Beta": "\u03b2"}
+            spin = ""
+            if len(set(md.mo_spins)) > 1 and self.current_mo < len(md.mo_spins):
+                s = md.mo_spins[self.current_mo]
+                spin = f" {spin_symbol.get(s, s)}"
+            mo_str = f"MO {self.current_mo + 1}/{md.n_mos}{spin}"
+            sym_str = f" {sym}" if len(set(md.mo_symmetries)) > 1 else ""
+            parts.append(f"{mo_str}{sym_str} E={energy:.5f} occ={occ:.5f}")
         return " | ".join(parts)
 
     def _update_title(self) -> None:
@@ -520,10 +521,16 @@ class MoltuiApp(App):
         mo_panel.select_mo(mo_idx)
 
     def action_next_mo(self) -> None:
-        self._set_current_mo(self.current_mo + 1)
+        mo_panel = self.query_one(MOPanel)
+        next_mo = mo_panel.adjacent_mo(self.current_mo, 1)
+        if next_mo is not None:
+            self._set_current_mo(next_mo)
 
     def action_prev_mo(self) -> None:
-        self._set_current_mo(self.current_mo - 1)
+        mo_panel = self.query_one(MOPanel)
+        prev_mo = mo_panel.adjacent_mo(self.current_mo, -1)
+        if prev_mo is not None:
+            self._set_current_mo(prev_mo)
 
     def _debounced_switch_mo(self) -> None:
         self._update_title()

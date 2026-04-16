@@ -16,6 +16,7 @@ class MoldenData:
     mo_energies: np.ndarray
     mo_occupations: np.ndarray
     mo_symmetries: list[str]
+    mo_spins: list[str]
     n_mos: int
     homo_idx: int
     _basis: MoldenBasis = field(repr=False)
@@ -73,6 +74,7 @@ def load_molden_data(filepath: str | Path) -> MoldenData:
         mo_energies=basis.mo_energies,
         mo_occupations=basis.mo_occupations,
         mo_symmetries=basis.mo_symmetries,
+        mo_spins=basis.mo_spins,
         n_mos=basis.mo_coefficients.shape[1],
         homo_idx=homo_idx,
         _basis=basis,

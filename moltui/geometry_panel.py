@@ -17,6 +17,7 @@ class GeometryPanel(Widget):
     ]
     DEFAULT_CSS = """
     GeometryPanel {
+        dock: right;
         width: 45;
         display: none;
         border-left: solid $accent;

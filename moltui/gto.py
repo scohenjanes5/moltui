@@ -42,6 +42,7 @@ class MoldenBasis:
     mo_occupations: np.ndarray
     mo_coefficients: np.ndarray  # (nao, nmo)
     mo_symmetries: list[str]
+    mo_spins: list[str]
     spherical: dict[int, bool]  # l -> True if spherical
 
 
@@ -65,6 +66,7 @@ def parse_molden(filepath: str | Path) -> MoldenBasis:
     mo_energies: list[float] = []
     mo_occupations: list[float] = []
     mo_symmetries: list[str] = []
+    mo_spins: list[str] = []
     mo_coeffs_list: list[list[float]] = []
     # Default: cartesian for d and above
     spherical: dict[int, bool] = {2: False, 3: False, 4: False}
@@ -153,6 +155,8 @@ def parse_molden(filepath: str | Path) -> MoldenBasis:
                     mo_symmetries.append(mline.split("=")[1].strip())
                 elif mline.startswith("Ene="):
                     mo_energies.append(float(mline.split("=")[1].strip()))
+                elif mline.startswith("Spin="):
+                    mo_spins.append(mline.split("=")[1].strip())
                 elif mline.startswith("Occup="):
                     mo_occupations.append(float(mline.split("=")[1].strip()))
                 elif mline and mline[0].isdigit():
@@ -176,6 +180,7 @@ def parse_molden(filepath: str | Path) -> MoldenBasis:
         mo_occupations=np.array(mo_occupations),
         mo_coefficients=mo_coeff_arr,
         mo_symmetries=mo_symmetries,
+        mo_spins=mo_spins,
         spherical=spherical,
     )
 

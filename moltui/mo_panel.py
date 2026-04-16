@@ -9,7 +9,8 @@ from textual.widgets import DataTable
 class MOPanel(Widget):
     DEFAULT_CSS = """
     MOPanel {
-        width: 45;
+        dock: right;
+        width: auto;
         display: none;
         border-left: solid $accent;
     }
@@ -17,6 +18,7 @@ class MOPanel(Widget):
         display: block;
     }
     MOPanel DataTable {
+        width: auto;
         height: 1fr;
     }
     """
@@ -37,21 +39,17 @@ class MOPanel(Widget):
         energies: list[float],
         occupations: list[float],
         symmetries: list[str],
-        homo_idx: int,
+        spins: list[str],
         current_mo: int,
     ) -> None:
         self._current_mo = current_mo
         self._mo_data = []
         for i in range(len(energies)):
             sym = symmetries[i] if i < len(symmetries) else ""
-            label = ""
-            if i == homo_idx:
-                label = "HOMO"
-            elif i == homo_idx + 1:
-                label = "LUMO"
-            self._mo_data.append((i, sym, energies[i], occupations[i], label))
-        # Always sort by energy
-        self._mo_data.sort(key=lambda x: x[2])
+            spin = spins[i] if i < len(spins) else ""
+            self._mo_data.append((i, sym, energies[i], occupations[i], spin))
+        # Sort by occupancy descending, then energy ascending within each group
+        self._mo_data.sort(key=lambda x: (-x[3], x[2]))
         if self.is_mounted:
             self._populate_table()
 
@@ -66,18 +64,37 @@ class MOPanel(Widget):
         self._populating = True
         table = self.query_one("#mo-table", DataTable)
         table.clear(columns=True)
-        table.add_columns("MO", "Sym", "Energy", "Occ", "")
+
+        syms = {s for _, s, _, _, _ in self._mo_data}
+        show_sym = len(syms) > 1
+        spins = {s for _, _, _, _, s in self._mo_data}
+        show_spin = len(spins) > 1
+
+        columns = ["MO"]
+        if show_sym:
+            columns.append("Sym")
+        columns.extend(["Energy", "Occ"])
+        table.add_columns(*columns)
+
+        spin_symbol = {"Alpha": "\u03b1", "Beta": "\u03b2"}
+
+        max_mo_num = max((mo_idx + 1 for mo_idx, *_ in self._mo_data), default=1)
+        mo_width = len(str(max_mo_num))
+        if show_spin:
+            mo_width += 2  # space + spin symbol
 
         current_row = 0
-        for idx, (mo_idx, sym, energy, occ, label) in enumerate(self._mo_data):
-            table.add_row(
-                str(mo_idx + 1),
-                sym,
-                f"{energy:.4f}",
-                f"{occ:.1f}",
-                label,
-                key=str(mo_idx),
-            )
+        for idx, (mo_idx, sym, energy, occ, spin) in enumerate(self._mo_data):
+            mo_label = str(mo_idx + 1)
+            if show_spin:
+                mo_label += f" {spin_symbol.get(spin, spin)}"
+            mo_label = mo_label.rjust(mo_width)
+            row = [mo_label]
+            if show_sym:
+                row.append(sym)
+            row.append(f"{energy:>10.5f}")
+            row.append(f"{occ:.5f}")
+            table.add_row(*row, key=str(mo_idx))
             if mo_idx == self._current_mo:
                 current_row = idx
 
@@ -94,6 +111,16 @@ class MOPanel(Widget):
         viewport_rows = max(1, table.size.height - 1)  # account for header row
         center_target = max(0, row - viewport_rows // 2)
         table.scroll_to(y=center_target, animate=False, immediate=True)
+
+    def adjacent_mo(self, mo_idx: int, delta: int) -> int | None:
+        """Return the MO index of the next/prev entry in table order."""
+        for row, (mi, *_) in enumerate(self._mo_data):
+            if mi == mo_idx:
+                target = row + delta
+                if 0 <= target < len(self._mo_data):
+                    return self._mo_data[target][0]
+                return None
+        return None
 
     def select_mo(self, mo_idx: int, *, center: bool = False) -> None:
         """Move the cursor to the given MO index."""
