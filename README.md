@@ -1,6 +1,6 @@
 # MolTUI
 
-**Terminal-based 3D molecular viewer** for **XYZ**, **Zmat**, **Molden**, **Gaussian Cube** and **ORCA GBW** file formats.
+**Terminal-based 3D molecular viewer** for **XYZ**, **Zmat**, **Molden**, **Gaussian Cube** and **ORCA GBW** file formats rendered entirely in **Unicode** characters. 
 
 <img width="480" height="480" alt="benzene" src="https://github.com/user-attachments/assets/c71de594-9dd3-4cb4-9754-e86dc663f730" />
 
@@ -8,6 +8,8 @@
 
 ```bash
 pip install moltui
+# or
+uv tool install moltui
 ```
 
 ## Usage
@@ -100,4 +102,8 @@ The `V` key opens a sidebar where the style and lighting can be modified.
 | Key | Action |
 |-----|--------|
 | `q` | **Quit** |
+
+## Limitations
+
+Quality of rendering might depend on terminal emulator and font. All figures in the repository have been generated using the  JetBrains Mono Nerd Font in the Kitty terminal. 
 
