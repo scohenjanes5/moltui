@@ -21,7 +21,7 @@ moltui <file>
 ### Visualize Orbitals
 
 - The **rendering** of orbitals can be toggled via `o`.
-- Molden and GBW files can contain **multiple molecular orbitals**. **Toggle the orbital **sidebar** with `m`. **Cycle** through MOs with `n`ext and `p`rev (or via `[` and `]` even when the sidebar is hidden)
+- Molden and GBW files can contain **multiple molecular orbitals**. **Toggle** the orbital **sidebar** with `m`. **Cycle** through MOs with `n`ext and `p`rev (or via `[` and `]` even when the sidebar is hidden)
 
 <img width="1512" height="926" alt="image" src="https://github.com/user-attachments/assets/4c1743ba-aff0-4683-92a7-7ebfaa361258" />
 
