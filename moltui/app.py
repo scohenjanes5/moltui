@@ -569,24 +569,43 @@ class MoltuiApp(App):
             self._mo_switch_timer = self.set_timer(0.3, self._mo_cooldown_done)
 
 
+def _detect_filetype(filepath: str) -> str:
+    """Detect file type from content, falling back to extension."""
+    with open(filepath) as f:
+        for line in f:
+            stripped = line.strip()
+            if not stripped:
+                continue
+            if "[Molden Format]" in stripped:
+                return "molden"
+            try:
+                int(stripped)
+                return "xyz"
+            except ValueError:
+                pass
+            return "cube"
+    return Path(filepath).suffix.lstrip(".").lower()
+
+
 def run():
     args = sys.argv[1:]
 
     if len(args) < 1:
-        print("Usage: moltui <file.xyz|file.cube|file.molden>")
+        print("Usage: moltui <file>")
+        print("Supported formats: XYZ, Cube, Molden")
         sys.exit(1)
 
     filepath = args[0]
-    suffix = Path(filepath).suffix.lower()
+    filetype = _detect_filetype(filepath)
     isosurfaces: list[IsosurfaceMesh] = []
     molden_data = None
     current_mo = 0
 
-    if suffix == ".cube":
+    if filetype == "cube":
         cube_data = parse_cube_data(filepath)
         molecule = cube_data.molecule
         isosurfaces = extract_isosurfaces(cube_data)
-    elif suffix == ".molden":
+    elif filetype == "molden":
         from .molden import evaluate_mo, load_molden_data
 
         molden_data = load_molden_data(filepath)
