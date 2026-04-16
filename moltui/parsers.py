@@ -100,6 +100,161 @@ def parse_cube_data(filepath: str | Path) -> CubeData:
     )
 
 
+def _zmat_to_cartesian(
+    symbols: list[str],
+    refs: list[tuple[int, ...]],
+    values: list[tuple[float, ...]],
+) -> list[np.ndarray]:
+    """Convert Z-matrix internal coordinates to Cartesian positions.
+
+    Each entry in refs/values corresponds to the atom at that index:
+      atom 0: no refs/values (placed at origin)
+      atom 1: (ref_atom,) / (distance,)
+      atom 2: (ref_atom, angle_atom) / (distance, angle_deg)
+      atom 3+: (ref_atom, angle_atom, dihedral_atom) / (distance, angle_deg, dihedral_deg)
+    """
+    coords: list[np.ndarray] = []
+    for i in range(len(symbols)):
+        if i == 0:
+            coords.append(np.array([0.0, 0.0, 0.0]))
+        elif i == 1:
+            r = values[i][0]
+            coords.append(np.array([r, 0.0, 0.0]))
+        elif i == 2:
+            r = values[i][0]
+            angle = np.radians(values[i][1])
+            ref_a = refs[i][0]
+            ref_b = refs[i][1]
+            # Place along the ref_a -> ref_b direction, rotated by angle
+            d = coords[ref_a] - coords[ref_b]
+            d_norm = d / (np.linalg.norm(d) + 1e-15)
+            # Pick a perpendicular vector
+            if abs(d_norm[1]) < 0.9:
+                perp = np.cross(d_norm, np.array([0.0, 1.0, 0.0]))
+            else:
+                perp = np.cross(d_norm, np.array([1.0, 0.0, 0.0]))
+            perp /= np.linalg.norm(perp) + 1e-15
+            pos = coords[ref_a] + r * (-d_norm * np.cos(angle) + perp * np.sin(angle))
+            coords.append(pos)
+        else:
+            r = values[i][0]
+            angle = np.radians(values[i][1])
+            dihedral = np.radians(values[i][2])
+            ref_a = refs[i][0]  # bonded to this atom
+            ref_b = refs[i][1]  # angle vertex
+            ref_c = refs[i][2]  # dihedral reference
+
+            ab = coords[ref_b] - coords[ref_a]
+            ab /= np.linalg.norm(ab) + 1e-15
+            bc = coords[ref_c] - coords[ref_b]
+
+            # Build local frame: n = ab direction, d2 perpendicular in abc plane
+            n = ab
+            bc_perp = bc - np.dot(bc, n) * n
+            bc_perp_norm = np.linalg.norm(bc_perp)
+            if bc_perp_norm < 1e-10:
+                # Degenerate: pick arbitrary perpendicular
+                if abs(n[1]) < 0.9:
+                    d2 = np.cross(n, np.array([0.0, 1.0, 0.0]))
+                else:
+                    d2 = np.cross(n, np.array([1.0, 0.0, 0.0]))
+                d2 /= np.linalg.norm(d2)
+            else:
+                d2 = bc_perp / bc_perp_norm
+            d3 = np.cross(n, d2)
+
+            pos = coords[ref_a] + r * (
+                -n * np.cos(angle)
+                + d2 * np.sin(angle) * np.cos(dihedral)
+                + d3 * np.sin(angle) * np.sin(dihedral)
+            )
+            coords.append(pos)
+    return coords
+
+
+def parse_zmat(filepath: str | Path) -> Molecule:
+    """Parse a Z-matrix file into a Molecule.
+
+    Supports both inline numeric values and named variables with a
+    variables section separated by a blank line.
+    """
+    filepath = Path(filepath)
+    with open(filepath) as f:
+        text = f.read()
+
+    # Split into atom lines and optional variables section
+    sections = text.strip().split("\n\n")
+    atom_lines = [l.strip() for l in sections[0].strip().splitlines() if l.strip()]
+
+    # Parse variables if present
+    variables: dict[str, float] = {}
+    for section in sections[1:]:
+        for line in section.strip().splitlines():
+            line = line.strip()
+            if not line or line.startswith("#"):
+                continue
+            if "=" in line:
+                name, val = line.split("=", 1)
+                variables[name.strip()] = float(val.strip())
+
+    def _resolve(token: str) -> float:
+        """Resolve a token to a float, looking up variables if needed."""
+        try:
+            return float(token)
+        except ValueError:
+            # Handle negative variable references like -a1
+            if token.startswith("-") and token[1:] in variables:
+                return -variables[token[1:]]
+            return variables[token]
+
+    symbols: list[str] = []
+    refs: list[tuple[int, ...]] = []
+    values: list[tuple[float, ...]] = []
+
+    for i, line in enumerate(atom_lines):
+        parts = line.split()
+        sym = parts[0]
+        # Strip numeric suffix from labels like C1, H3
+        sym_clean = ""
+        for ch in sym:
+            if ch.isalpha():
+                sym_clean += ch
+            else:
+                break
+        symbols.append(sym_clean)
+
+        if i == 0:
+            refs.append(())
+            values.append(())
+        elif i == 1:
+            ref_a = int(parts[1]) - 1
+            dist = _resolve(parts[2])
+            refs.append((ref_a,))
+            values.append((dist,))
+        elif i == 2:
+            ref_a = int(parts[1]) - 1
+            dist = _resolve(parts[2])
+            ref_b = int(parts[3]) - 1
+            ang = _resolve(parts[4])
+            refs.append((ref_a, ref_b))
+            values.append((dist, ang))
+        else:
+            ref_a = int(parts[1]) - 1
+            dist = _resolve(parts[2])
+            ref_b = int(parts[3]) - 1
+            ang = _resolve(parts[4])
+            ref_c = int(parts[5]) - 1
+            dih = _resolve(parts[6])
+            refs.append((ref_a, ref_b, ref_c))
+            values.append((dist, ang, dih))
+
+    positions = _zmat_to_cartesian(symbols, refs, values)
+    atoms = [Atom(element=get_element(sym), position=pos) for sym, pos in zip(symbols, positions)]
+    mol = Molecule(atoms=atoms, bonds=[])
+    mol.detect_bonds()
+    return mol
+
+
 def load_molecule(filepath: str | Path) -> Molecule:
     filepath = Path(filepath)
     suffix = filepath.suffix.lower()
@@ -111,6 +266,8 @@ def load_molecule(filepath: str | Path) -> Molecule:
         from .molden import parse_molden_atoms
 
         return parse_molden_atoms(filepath)
+    elif suffix in (".zmat", ".zmatrix"):
+        return parse_zmat(filepath)
     elif suffix == ".gbw":
         raise ValueError(
             ".gbw files must be opened via the moltui command, not load_molecule(). "

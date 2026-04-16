@@ -760,6 +760,8 @@ def _detect_filetype(filepath: str) -> str:
     suffix = Path(filepath).suffix.lower()
     if suffix == ".gbw":
         return "gbw"
+    if suffix in (".zmat", ".zmatrix"):
+        return "zmat"
     with open(filepath) as f:
         for line in f:
             stripped = line.strip()
