@@ -61,6 +61,7 @@ class MoleculeView(Widget):
         self.pan_y = 0.0
         self.pan_mode = False
         self.highlighted_atoms: set[int] = set()
+        self.show_atom_numbers = False
         self.licorice = False
         self.ambient = 0.50
         self.diffuse = 0.60
@@ -153,14 +154,45 @@ class MoleculeView(Widget):
         any_hit = on_count > 0
         bg_style = Style(bgcolor=f"rgb({bg[0]},{bg[1]},{bg[2]})")
 
+        # Compute atom number label positions if enabled
+        label_cells: dict[tuple[int, int], tuple[str, Style]] = {}
+        if self.show_atom_numbers and self.molecule is not None:
+            fov = 1.5
+            scale = min(px_w, px_h) / 2
+            centroid = self.molecule.center()
+            label_style = Style(
+                color="rgb(255,255,0)" if self.dark_bg else "rgb(0,0,180)",
+                bgcolor=f"rgb({bg[0]},{bg[1]},{bg[2]})",
+                bold=True,
+            )
+            for idx, atom in enumerate(self.molecule.atoms):
+                pos = rot @ (atom.position - centroid)
+                pos[0] += self.pan_x
+                pos[1] += self.pan_y
+                pos[2] += self.camera_distance
+                if pos[2] <= 0.1:
+                    continue
+                sx = px_w / 2 + pos[0] * fov / pos[2] * scale
+                sy = px_h / 2 - pos[1] * fov / pos[2] * scale
+                # Convert pixel coords to terminal cell coords
+                cell_col = int(sx / 2)
+                cell_row = int(sy / 4) - 1  # place label above atom
+                label = str(idx + 1)
+                for ci, ch in enumerate(label):
+                    c = cell_col + ci
+                    if 0 <= cell_row < rows and 0 <= c < cols:
+                        label_cells[(cell_row, c)] = (ch, label_style)
+
         strips = []
         for row in range(rows):
             segments = []
             prev_style = None
             run_chars: list[str] = []
             for x in range(cols):
-                cp = int(codepoints[row, x])
-                if self.dark_bg:
+                if (row, x) in label_cells:
+                    ch, style = label_cells[(row, x)]
+                elif self.dark_bg:
+                    cp = int(codepoints[row, x])
                     if cp == 0x2800:
                         style = bg_style
                         ch = " "
@@ -172,6 +204,7 @@ class MoleculeView(Widget):
                         )
                         ch = chr(cp)
                 else:
+                    cp = int(codepoints[row, x])
                     if not any_hit[row, x]:
                         style = bg_style
                         ch = " "
@@ -240,6 +273,7 @@ class MoltuiApp(App):
         Binding("m", "toggle_mo_panel", "MOs"),
         Binding("right_square_bracket", "next_mo", "MO]", show=False),
         Binding("left_square_bracket", "prev_mo", "[MO", show=False),
+        Binding("number_sign", "toggle_atom_numbers", "#Nums"),
         Binding("n", "panel_next", "Next"),
         Binding("p", "panel_prev", "Prev"),
         Binding("s", "toggle_visual", "Visual"),
@@ -408,6 +442,11 @@ class MoltuiApp(App):
                 specular=view.specular,
                 shininess=view.shininess,
             )
+        view._invalidate_cache()
+
+    def action_toggle_atom_numbers(self) -> None:
+        view = self.query_one(MoleculeView)
+        view.show_atom_numbers = not view.show_atom_numbers
         view._invalidate_cache()
 
     def action_toggle_bonds(self) -> None:
