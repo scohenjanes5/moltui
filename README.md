@@ -48,16 +48,10 @@ The `V` key opens a sidebar where the style and lighting can be modified.
 
 ## Supported formats
 
-### Structures
+- **Structures Only**: **XYZ**, Gaussian **ZMAT**
+- **Structures and Orbitals**: **Molden**, Gaussian **Cube**, Orca **GBW**¹
 
-- **XYZ**
-- **Gaussian Zmat**
-
-### Structures and Orbitals
-
-- **Gaussian Cube**
-- **Molden**
-- **Orca GBW** (requires `orca_2mkl` in `PATH`)
+¹ Requires `orca_2mkl` in `PATH`
 
 ## Keybindings
 
