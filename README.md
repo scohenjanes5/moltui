@@ -2,7 +2,7 @@
 
 <img width="480" height="480" alt="benzene" src="https://github.com/user-attachments/assets/c71de594-9dd3-4cb4-9754-e86dc663f730" />
 
-**Terminal-based 3D molecular viewer**.
+**Terminal-based 3D molecular viewer** for **XYZ**, **Zmat**, **Molden**, **Gaussian Cube** and **ORCA GBW** file formats.
 
 ## Installation
 
@@ -16,32 +16,27 @@ pip install moltui
 moltui <file>
 ```
 
-
-
 ## Features
 
 ### Visualize Orbitals
 
-The displaying of orbitals can be toggled via `o`.
-Molden and GBW files can contain multiple molecular orbitals.
-Toggle the orbital side bar with `m`.
-Cycle through MOs with `n`ext and `p`rev.
+- The **rendering** of orbitals can be toggled via `o`.
+- Molden and GBW files can contain **multiple molecular orbitals**. **Toggle the orbital **sidebar** with `m`. **Cycle** through MOs with `n`ext and `p`rev (or via `[` and `]` even when the sidebar is hidden)
 
 <img width="1512" height="926" alt="image" src="https://github.com/user-attachments/assets/4c1743ba-aff0-4683-92a7-7ebfaa361258" />
 
 ### Analyze Geometry
 
-Bond lengths, angles and dihedrals can be viewed using the `g`eomtry key which opens a sidebar.
-Navigate between tabs via `<tab>`.
-The quantity is highlighted in yellow on the molecule.
-The quantity can be sorted in ascending order via `s`.
-Toggle atom indices via `#`
+- **Bond lengths, angles and dihedrals** can be viewed using the `g`eomtry key which opens a sidebar. Navigate between tabs via `<tab>`.
+- The quantity is **highlighted in yellow** on the molecule
+- **Sort** the quantity in ascending order via `s`.
+- **Atom indices** can be toggled via `#`
 
 <img width="1510" height="923" alt="image" src="https://github.com/user-attachments/assets/8a6dab9a-d377-4d16-bfe1-89c83d0763a1" />
 
 ### Export to PNG Format
 
-The `e` exports the current scene to a PNG.
+The `e` **exports** the current **scene** to a **PNG**.
 
 <img width="800" height="600" alt="benzene_hf 021" src="https://github.com/user-attachments/assets/2ca67320-9053-4b86-989f-b2abfaca8864" />
 
@@ -49,14 +44,14 @@ The `e` exports the current scene to a PNG.
 
 ### Structures
 
-- XYZ
-- Gaussian Zmat
+- **XYZ**
+- **Gaussian Zmat**
 
 ### Structures and Orbitals
 
-- Gaussian Cube
-- Molden
-- ORCA GBW (requires `orca_2mkl` in ``)
+- **Gaussian Cube**
+- **Molden**
+- **Orca GBW** (requires `orca_2mkl` in `PATH`)
 
 ## Keybindings
 
