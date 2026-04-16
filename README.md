@@ -105,5 +105,5 @@ The `V` key opens a sidebar where the style and lighting can be modified.
 
 ## Limitations
 
-Quality of rendering might depend on terminal emulator and font. All figures in the repository have been generated using the  JetBrains Mono Nerd Font in the Kitty terminal. 
-
+- Quality of rendering might depend on terminal emulator and font. All figures in the repository have been generated using the  JetBrains Mono Nerd Font in the Kitty terminal. 
+- The Orca GBW file format is typically incompatible between versions. Therefore, the `orca_2mkl` should ideally be of the same version as the Orca version used to produce the GBW file. Newer version of Orca can try to recover earlier GBW files using the [rescue](https://orca-manual.mpi-muelheim.mpg.de/contents/quickstartguide/troubleshooting.html#using-old-orca-inputs) feature. 
