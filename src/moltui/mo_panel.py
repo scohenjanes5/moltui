@@ -72,7 +72,7 @@ class MOPanel(Widget):
 
         columns = ["MO"]
         if show_sym:
-            columns.append("Sym")
+            columns.append("Irrep")
         columns.extend(["Energy", "Occ"])
         table.add_columns(*columns)
 

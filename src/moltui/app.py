@@ -18,7 +18,7 @@ from .geometry_panel import GeometryPanel
 from .image_renderer import render_scene, rotation_matrix
 from .isosurface import IsosurfaceMesh, extract_isosurfaces
 from .mo_panel import MOPanel
-from .parsers import load_molecule, parse_cube_data
+from .parsers import CubeData, load_molecule, parse_cube_data
 from .visual_panel import VisualPanel
 
 # Braille dot positions: each cell is 2 wide x 4 tall
@@ -36,11 +36,13 @@ _BRAILLE_MAP = np.array(
 )
 
 
-def _compute_mo_isosurfaces(molden_data, mo_idx: int) -> list[IsosurfaceMesh]:
+def _compute_mo_isosurfaces(
+    molden_data, mo_idx: int, isovalue: float = 0.05
+) -> list[IsosurfaceMesh]:
     from .molden import evaluate_mo
 
     cube_data = evaluate_mo(molden_data, mo_idx)
-    return extract_isosurfaces(cube_data)
+    return extract_isosurfaces(cube_data, isovalue=isovalue)
 
 
 class MoleculeView(Widget):
@@ -300,6 +302,8 @@ class MoltuiApp(App):
         self._isosurfaces = isosurfaces or []
         self.molden_data = molden_data
         self.current_mo = current_mo
+        self._cube_data: CubeData | None = None
+        self.isovalue: float = 0.05
         self._mo_switch_timer = None
         self._mo_pending = False
         self._mo_switch_task: asyncio.Task[None] | None = None
@@ -465,6 +469,8 @@ class MoltuiApp(App):
                 shininess=view.shininess,
                 atom_scale=view.atom_scale,
                 bond_radius=view.bond_radius,
+                isovalue=self.isovalue,
+                has_isosurfaces=bool(self._isosurfaces),
             )
         view._invalidate_cache()
 
@@ -662,6 +668,8 @@ class MoltuiApp(App):
                 shininess=view.shininess,
                 atom_scale=view.atom_scale,
                 bond_radius=view.bond_radius,
+                isovalue=self.isovalue,
+                has_isosurfaces=bool(self._isosurfaces),
             )
             vis.add_class("visible")
             for child in vis.query("*"):
@@ -689,8 +697,20 @@ class MoltuiApp(App):
                 shininess=view.shininess,
                 atom_scale=view.atom_scale,
                 bond_radius=view.bond_radius,
+                isovalue=self.isovalue,
+                has_isosurfaces=bool(self._isosurfaces),
             )
         view._invalidate_cache()
+
+    def on_visual_panel_isovalue_changed(self, event: VisualPanel.IsovalueChanged) -> None:
+        self.isovalue = event.isovalue
+        if self._cube_data is not None:
+            self._isosurfaces = extract_isosurfaces(self._cube_data, isovalue=self.isovalue)
+            view = self.query_one(MoleculeView)
+            view.isosurfaces = self._isosurfaces
+            view._invalidate_cache()
+        elif self.molden_data is not None:
+            self._switch_mo()
 
     def on_visual_panel_lighting_changed(self, event: VisualPanel.LightingChanged) -> None:
         view = self.query_one(MoleculeView)
@@ -760,7 +780,7 @@ class MoltuiApp(App):
             if self.molden_data is None:
                 return
             isosurfaces = await asyncio.to_thread(
-                _compute_mo_isosurfaces, self.molden_data, target_mo
+                _compute_mo_isosurfaces, self.molden_data, target_mo, self.isovalue
             )
             # If user moved again while this was computing, skip stale frame.
             if target_mo != self.current_mo:
@@ -869,10 +889,12 @@ def run():
         filetype = "molden"
 
     try:
+        cube_data_for_app: CubeData | None = None
         if filetype == "cube":
             cube_data = parse_cube_data(filepath)
             molecule = cube_data.molecule
             isosurfaces = extract_isosurfaces(cube_data)
+            cube_data_for_app = cube_data
         elif filetype == "molden":
             from .molden import evaluate_mo, load_molden_data
 
@@ -891,6 +913,7 @@ def run():
             molden_data=molden_data,
             current_mo=current_mo,
         )
+        app._cube_data = cube_data_for_app
         app.run()
     finally:
         if gbw_tmpdir is not None:

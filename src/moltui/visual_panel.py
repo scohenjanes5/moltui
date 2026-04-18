@@ -51,6 +51,7 @@ class Slider(Static, can_focus=True):
         min_val: float = 0.0,
         max_val: float = 1.0,
         step: float = 0.05,
+        decimals: int = 2,
         **kwargs,
     ) -> None:
         super().__init__(**kwargs)
@@ -59,6 +60,7 @@ class Slider(Static, can_focus=True):
         self.min_val = min_val
         self.max_val = max_val
         self.step = step
+        self.decimals = decimals
 
     class Changed(Message):
         def __init__(self, slider: "Slider", value: float) -> None:
@@ -73,7 +75,7 @@ class Slider(Static, can_focus=True):
         bar = "\u2588" * filled + "\u2591" * (bar_width - filled)
         prefix = "\u25b8 " if self.has_focus else "  "
         arrows = " \u25c0\u25b6" if self.has_focus else ""
-        return f"{prefix}{self.label}: {self.value:.2f} [{bar}]{arrows}"
+        return f"{prefix}{self.label}: {self.value:.{self.decimals}f} [{bar}]{arrows}"
 
     def _adjust(self, delta: float) -> None:
         new = max(self.min_val, min(self.max_val, self.value + delta))
@@ -143,10 +145,16 @@ class VisualPanel(Widget):
             self.atom_scale = atom_scale
             self.bond_radius = bond_radius
 
+    class IsovalueChanged(Message):
+        def __init__(self, isovalue: float) -> None:
+            super().__init__()
+            self.isovalue = isovalue
+
     def __init__(self) -> None:
         super().__init__()
         self._licorice = False
         self._vdw = False
+        self._has_isosurfaces = False
 
     def set_state(
         self,
@@ -159,9 +167,12 @@ class VisualPanel(Widget):
         shininess: float,
         atom_scale: float,
         bond_radius: float,
+        isovalue: float = 0.05,
+        has_isosurfaces: bool = False,
     ) -> None:
         self._licorice = licorice
         self._vdw = vdw
+        self._has_isosurfaces = has_isosurfaces
         if self.is_mounted:
             self._sync_widgets(
                 ambient=ambient,
@@ -170,6 +181,7 @@ class VisualPanel(Widget):
                 shininess=shininess,
                 atom_scale=atom_scale,
                 bond_radius=bond_radius,
+                isovalue=isovalue,
             )
 
     def _sync_widgets(
@@ -181,6 +193,7 @@ class VisualPanel(Widget):
         shininess: float,
         atom_scale: float,
         bond_radius: float,
+        isovalue: float = 0.05,
     ) -> None:
         radio_set = self.query_one(_NavRadioSet)
         if self._licorice:
@@ -196,7 +209,8 @@ class VisualPanel(Widget):
         self.query_one("#slider-diffuse", Slider).value = diffuse
         self.query_one("#slider-specular", Slider).value = specular
         self.query_one("#slider-shininess", Slider).value = shininess
-        self._update_atom_scale_visibility()
+        self.query_one("#slider-isovalue", Slider).value = isovalue
+        self._update_visibility()
         self.refresh()
 
     def compose(self) -> ComposeResult:
@@ -220,6 +234,16 @@ class VisualPanel(Widget):
             max_val=0.30,
             step=0.02,
             id="slider-bond-radius",
+        )
+        yield Label("Isosurface", id="label-isovalue")
+        yield Slider(
+            "Isovalue",
+            value=0.05,
+            min_val=0.001,
+            max_val=0.10,
+            step=0.005,
+            decimals=3,
+            id="slider-isovalue",
         )
         yield Label("Lighting")
         yield Slider(
@@ -256,20 +280,24 @@ class VisualPanel(Widget):
             id="visual-help",
         )
 
-    def _update_atom_scale_visibility(self) -> None:
+    def _update_visibility(self) -> None:
         self.query_one("#slider-atom-scale", Slider).display = not self._licorice and not self._vdw
         self.query_one("#slider-bond-radius", Slider).display = not self._vdw
         self.query_one("#label-sizes", Label).display = not self._vdw
+        self.query_one("#label-isovalue", Label).display = self._has_isosurfaces
+        self.query_one("#slider-isovalue", Slider).display = self._has_isosurfaces
 
     def on_radio_set_changed(self, event: RadioSet.Changed) -> None:
         self._licorice = event.pressed.id == "radio-licorice"
         self._vdw = event.pressed.id == "radio-vdw"
-        self._update_atom_scale_visibility()
+        self._update_visibility()
         self.post_message(self.StyleChanged(self._licorice, self._vdw))
 
     def on_slider_changed(self, event: Slider.Changed) -> None:
         sid = event.slider.id or ""
-        if sid.startswith("slider-atom") or sid.startswith("slider-bond"):
+        if sid == "slider-isovalue":
+            self.post_message(self.IsovalueChanged(event.value))
+        elif sid.startswith("slider-atom") or sid.startswith("slider-bond"):
             self.post_message(
                 self.SizeChanged(
                     atom_scale=self.query_one("#slider-atom-scale", Slider).value,
