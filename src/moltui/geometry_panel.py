@@ -73,9 +73,13 @@ class GeometryPanel(Widget):
             return
         tabs = self.query_one(TabbedContent)
         active = tabs.active
+        selected_row_key = self._current_row_key_value(self._table_for_tab(active))
         asc = self._sort_ascending.get(active, False)
         self._sort_ascending[active] = not asc
-        self._populate_tables()
+        self._populate_tables({active: selected_row_key} if selected_row_key is not None else None)
+        table = self._table_for_tab(active)
+        table.focus()
+        self._emit_current_highlight(table)
 
     def compose(self) -> ComposeResult:
         with TabbedContent("Bonds", "Angles", "Dihedrals"):
@@ -91,10 +95,37 @@ class GeometryPanel(Widget):
             return str(idx + 1)
         return f"{idx + 1}:{self._molecule.atoms[idx].element.symbol}"
 
-    def _populate_tables(self) -> None:
+    def _table_for_tab(self, tab_id: str) -> DataTable:
+        table_id = {
+            "tab-bonds": "#bonds-table",
+            "tab-angles": "#angles-table",
+            "tab-dihedrals": "#dihedrals-table",
+        }.get(tab_id, "#bonds-table")
+        return self.query_one(table_id, DataTable)
+
+    def _current_row_key_value(self, dt: DataTable) -> str | None:
+        if dt.row_count == 0:
+            return None
+        row_keys = list(dt.rows.keys())
+        if not row_keys:
+            return None
+        row = max(0, min(dt.cursor_row, len(row_keys) - 1))
+        return row_keys[row].value
+
+    def _restore_cursor(self, dt: DataTable, row_key: str | None) -> None:
+        if row_key is None or dt.row_count == 0:
+            return
+        row_keys = list(dt.rows.keys())
+        for row, key in enumerate(row_keys):
+            if key.value == row_key:
+                dt.move_cursor(row=row, scroll=False)
+                return
+
+    def _populate_tables(self, selected_row_keys: dict[str, str | None] | None = None) -> None:
         if self._molecule is None:
             return
         self._populating = True
+        selected_row_keys = selected_row_keys or {}
 
         # Bonds
         bonds = self._molecule.get_bond_lengths()
@@ -110,6 +141,7 @@ class GeometryPanel(Widget):
                 f"{dist:.4f}",
                 key=f"{i}-{j}",
             )
+        self._restore_cursor(table, selected_row_keys.get("tab-bonds"))
 
         # Angles
         angles = self._molecule.get_angles()
@@ -126,6 +158,7 @@ class GeometryPanel(Widget):
                 f"{angle:.3f}",
                 key=f"{i}-{j}-{k}",
             )
+        self._restore_cursor(table, selected_row_keys.get("tab-angles"))
 
         # Dihedrals
         dihedrals = self._molecule.get_dihedrals()
@@ -143,6 +176,7 @@ class GeometryPanel(Widget):
                 f"{angle:.3f}",
                 key=f"{i}-{j}-{k}-{l}",
             )
+        self._restore_cursor(table, selected_row_keys.get("tab-dihedrals"))
 
         self._populating = False
 
