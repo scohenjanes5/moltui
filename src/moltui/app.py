@@ -63,6 +63,7 @@ class MoleculeView(Widget):
         self.highlighted_atoms: set[int] = set()
         self.show_atom_numbers = False
         self.licorice = False
+        self.vdw = False
         self.atom_scale = 0.35
         self.bond_radius = 0.08
         self.ambient = 0.50
@@ -131,6 +132,7 @@ class MoleculeView(Widget):
             pan=(self.pan_x, self.pan_y),
             highlighted_atoms=hl,
             licorice=self.licorice,
+            vdw=self.vdw,
             ambient=self.ambient,
             diffuse=self.diffuse,
             specular=self.specular,
@@ -437,12 +439,26 @@ class MoltuiApp(App):
 
     def action_toggle_style(self) -> None:
         view = self.query_one(MoleculeView)
-        view.licorice = not view.licorice
-        view.bond_radius = 0.15 if view.licorice else 0.08
+        if not view.licorice and not view.vdw:
+            # CPK → Licorice
+            view.licorice = True
+            view.vdw = False
+            view.bond_radius = 0.15
+        elif view.licorice:
+            # Licorice → VDW
+            view.licorice = False
+            view.vdw = True
+            view.bond_radius = 0.08
+        else:
+            # VDW → CPK
+            view.licorice = False
+            view.vdw = False
+            view.bond_radius = 0.08
         vis = self.query_one(VisualPanel)
         if vis.has_class("visible"):
             vis.set_state(
                 licorice=view.licorice,
+                vdw=view.vdw,
                 ambient=view.ambient,
                 diffuse=view.diffuse,
                 specular=view.specular,
@@ -516,6 +532,7 @@ class MoltuiApp(App):
             ssaa=2,
             pan=(view.pan_x, view.pan_y),
             licorice=view.licorice,
+            vdw=view.vdw,
             ambient=0.31,
             diffuse=0.72,
             specular=0.42,
@@ -638,6 +655,7 @@ class MoltuiApp(App):
         if not was_visible:
             vis.set_state(
                 licorice=view.licorice,
+                vdw=view.vdw,
                 ambient=view.ambient,
                 diffuse=view.diffuse,
                 specular=view.specular,
@@ -657,12 +675,14 @@ class MoltuiApp(App):
     def on_visual_panel_style_changed(self, event: VisualPanel.StyleChanged) -> None:
         view = self.query_one(MoleculeView)
         view.licorice = event.licorice
+        view.vdw = event.vdw
         # Switch bond_radius to a sensible default for the style
         view.bond_radius = 0.15 if event.licorice else 0.08
         vis = self.query_one(VisualPanel)
         if vis.has_class("visible"):
             vis.set_state(
                 licorice=view.licorice,
+                vdw=view.vdw,
                 ambient=view.ambient,
                 diffuse=view.diffuse,
                 specular=view.specular,

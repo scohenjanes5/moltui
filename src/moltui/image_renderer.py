@@ -456,6 +456,7 @@ class ImageRenderer:
         pan: tuple[float, float] = (0.0, 0.0),
         highlighted_atoms: set[int] | None = None,
         licorice: bool = False,
+        vdw: bool = False,
     ):
         self.clear()
         if not molecule.atoms:
@@ -478,13 +479,14 @@ class ImageRenderer:
             pos[2] += camera_distance
             transformed.append(pos)
 
-        for i, j in molecule.bonds:
-            c1 = molecule.atoms[i].element.cpk_color
-            c2 = molecule.atoms[j].element.cpk_color
-            if has_hl and i in hl and j in hl:
-                c1 = self._highlight_color()
-                c2 = self._highlight_color()
-            self.render_bond(transformed[i], transformed[j], c1, c2)
+        if not vdw:
+            for i, j in molecule.bonds:
+                c1 = molecule.atoms[i].element.cpk_color
+                c2 = molecule.atoms[j].element.cpk_color
+                if has_hl and i in hl and j in hl:
+                    c1 = self._highlight_color()
+                    c2 = self._highlight_color()
+                self.render_bond(transformed[i], transformed[j], c1, c2)
 
         atom_order = sorted(
             range(len(molecule.atoms)),
@@ -492,7 +494,9 @@ class ImageRenderer:
         )
         for i in atom_order:
             atom = molecule.atoms[i]
-            if licorice:
+            if vdw:
+                radius = atom.element.vdw_radius
+            elif licorice:
                 radius = self.bond_radius
             else:
                 radius = atom.element.covalent_radius * self.atom_scale
@@ -512,6 +516,7 @@ def render_scene(
     pan: tuple[float, float] = (0.0, 0.0),
     highlighted_atoms: set[int] | None = None,
     licorice: bool = False,
+    vdw: bool = False,
     ambient: float | None = None,
     diffuse: float | None = None,
     specular: float | None = None,
@@ -545,6 +550,7 @@ def render_scene(
         pan=pan,
         highlighted_atoms=highlighted_atoms,
         licorice=licorice,
+        vdw=vdw,
     )
     hit = np.isfinite(r.z_buf)
     if ssaa == 1:

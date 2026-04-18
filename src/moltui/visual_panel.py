@@ -118,9 +118,10 @@ class VisualPanel(Widget):
     """
 
     class StyleChanged(Message):
-        def __init__(self, licorice: bool) -> None:
+        def __init__(self, licorice: bool, vdw: bool) -> None:
             super().__init__()
             self.licorice = licorice
+            self.vdw = vdw
 
     class LightingChanged(Message):
         def __init__(
@@ -145,11 +146,13 @@ class VisualPanel(Widget):
     def __init__(self) -> None:
         super().__init__()
         self._licorice = False
+        self._vdw = False
 
     def set_state(
         self,
         *,
         licorice: bool,
+        vdw: bool = False,
         ambient: float,
         diffuse: float,
         specular: float,
@@ -158,6 +161,7 @@ class VisualPanel(Widget):
         bond_radius: float,
     ) -> None:
         self._licorice = licorice
+        self._vdw = vdw
         if self.is_mounted:
             self._sync_widgets(
                 ambient=ambient,
@@ -179,7 +183,12 @@ class VisualPanel(Widget):
         bond_radius: float,
     ) -> None:
         radio_set = self.query_one(_NavRadioSet)
-        idx = 1 if self._licorice else 0
+        if self._licorice:
+            idx = 1
+        elif self._vdw:
+            idx = 2
+        else:
+            idx = 0
         radio_set.query(RadioButton)[idx].value = True
         self.query_one("#slider-atom-scale", Slider).value = atom_scale
         self.query_one("#slider-bond-radius", Slider).value = bond_radius
@@ -193,9 +202,10 @@ class VisualPanel(Widget):
     def compose(self) -> ComposeResult:
         yield Label("Style")
         with _NavRadioSet():
-            yield RadioButton("CPK (ball & stick)", value=True, id="radio-cpk")
+            yield RadioButton("CPK", value=True, id="radio-cpk")
             yield RadioButton("Licorice", id="radio-licorice")
-        yield Label("Sizes")
+            yield RadioButton("VDW", id="radio-vdw")
+        yield Label("Sizes", id="label-sizes")
         yield Slider(
             "Atom scale",
             value=0.35,
@@ -247,13 +257,15 @@ class VisualPanel(Widget):
         )
 
     def _update_atom_scale_visibility(self) -> None:
-        slider = self.query_one("#slider-atom-scale", Slider)
-        slider.display = not self._licorice
+        self.query_one("#slider-atom-scale", Slider).display = not self._licorice and not self._vdw
+        self.query_one("#slider-bond-radius", Slider).display = not self._vdw
+        self.query_one("#label-sizes", Label).display = not self._vdw
 
     def on_radio_set_changed(self, event: RadioSet.Changed) -> None:
         self._licorice = event.pressed.id == "radio-licorice"
+        self._vdw = event.pressed.id == "radio-vdw"
         self._update_atom_scale_visibility()
-        self.post_message(self.StyleChanged(self._licorice))
+        self.post_message(self.StyleChanged(self._licorice, self._vdw))
 
     def on_slider_changed(self, event: Slider.Changed) -> None:
         sid = event.slider.id or ""

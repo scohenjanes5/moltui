@@ -76,7 +76,7 @@ The `V` key opens a sidebar where the style and lighting can be modified.
 | `i` | Toggle **dark/light** theme |
 | `b` | Toggle **bonds** |
 | `e` | **Export** PNG |
-| `v` | Toggle CPK/licorice **style** |
+| `v` | Toggle style (CPK, Licorice, VDW) **style** |
 | `#` | Toggle **atom numbers** |
 
 ### Panels
