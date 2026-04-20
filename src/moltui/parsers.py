@@ -17,23 +17,70 @@ class CubeData:
     data: np.ndarray  # (n1, n2, n3) volumetric data
 
 
+@dataclass
+class XYZTrajectory:
+    molecule: Molecule
+    frames: np.ndarray  # (n_frames, n_atoms, 3) in Angstrom
+
+
 def parse_xyz(filepath: str | Path) -> Molecule:
+    return parse_xyz_trajectory(filepath).molecule
+
+
+def parse_xyz_trajectory(filepath: str | Path) -> XYZTrajectory:
     filepath = Path(filepath)
     with open(filepath) as f:
         lines = f.readlines()
 
-    n_atoms = int(lines[0].strip())
-    # line 1 is comment, skip
-    atoms = []
-    for line in lines[2 : 2 + n_atoms]:
-        parts = line.split()
-        symbol = parts[0]
-        x, y, z = float(parts[1]), float(parts[2]), float(parts[3])
-        atoms.append(Atom(element=get_element(symbol), position=np.array([x, y, z])))
+    frames: list[np.ndarray] = []
+    symbols_ref: list[str] | None = None
+    idx = 0
+    while idx < len(lines):
+        while idx < len(lines) and not lines[idx].strip():
+            idx += 1
+        if idx >= len(lines):
+            break
 
+        try:
+            n_atoms = int(lines[idx].strip())
+        except ValueError as exc:
+            raise ValueError(f"Invalid XYZ frame header at line {idx + 1}") from exc
+        frame_start = idx + 2
+        frame_end = frame_start + n_atoms
+        if frame_end > len(lines):
+            raise ValueError("Unexpected end of XYZ file while reading frame atoms")
+
+        frame_symbols: list[str] = []
+        frame_coords: list[list[float]] = []
+        for line in lines[frame_start:frame_end]:
+            parts = line.split()
+            if len(parts) < 4:
+                raise ValueError("Invalid XYZ atom line; expected: <symbol> <x> <y> <z>")
+            frame_symbols.append(parts[0])
+            frame_coords.append([float(parts[1]), float(parts[2]), float(parts[3])])
+
+        if symbols_ref is None:
+            symbols_ref = frame_symbols
+        else:
+            if len(frame_symbols) != len(symbols_ref):
+                raise ValueError("All XYZ frames must have the same atom count")
+            if frame_symbols != symbols_ref:
+                raise ValueError("All XYZ frames must preserve atom ordering and symbols")
+
+        frames.append(np.array(frame_coords, dtype=np.float64))
+        idx = frame_end
+
+    if not frames or symbols_ref is None:
+        raise ValueError("Empty XYZ file")
+
+    first_frame = frames[0]
+    atoms = [
+        Atom(element=get_element(symbol), position=first_frame[i].copy())
+        for i, symbol in enumerate(symbols_ref)
+    ]
     mol = Molecule(atoms=atoms, bonds=[])
     mol.detect_bonds()
-    return mol
+    return XYZTrajectory(molecule=mol, frames=np.stack(frames, axis=0))
 
 
 def parse_cube(filepath: str | Path) -> Molecule:

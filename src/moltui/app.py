@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+from dataclasses import dataclass
 from pathlib import Path
 
 import numpy as np
@@ -9,6 +10,7 @@ from rich.style import Style
 from textual.app import App, ComposeResult
 from textual.binding import Binding
 from textual.containers import Horizontal
+from textual.events import Key
 from textual.strip import Strip
 from textual.widget import Widget
 from textual.widgets import DataTable, Footer, Header, TabbedContent
@@ -18,7 +20,8 @@ from .geometry_panel import GeometryPanel
 from .image_renderer import render_scene, rotation_matrix
 from .isosurface import IsosurfaceMesh, extract_isosurfaces
 from .mo_panel import MOPanel
-from .parsers import CubeData, load_molecule, parse_cube_data
+from .normal_mode_panel import NormalModePanel
+from .parsers import CubeData, load_molecule, parse_cube_data, parse_xyz_trajectory
 from .visual_panel import VisualPanel
 
 # Braille dot positions: each cell is 2 wide x 4 tall
@@ -34,6 +37,10 @@ _BRAILLE_MAP = np.array(
     ],
     dtype=np.uint8,
 )
+_ZERO_MODE_FREQ_TOL_CM1 = 10.0
+_VIEW_GEOMETRY = "geometry"
+_VIEW_MO = "mo"
+_VIEW_NORMAL = "normal"
 
 
 def _compute_mo_isosurfaces(
@@ -43,6 +50,23 @@ def _compute_mo_isosurfaces(
 
     cube_data = evaluate_mo(molden_data, mo_idx)
     return extract_isosurfaces(cube_data, isovalue=isovalue)
+
+
+@dataclass
+class TrajectoryData:
+    frames: np.ndarray  # (n_frames, n_atoms, 3)
+    frame_index: int = 0
+
+
+@dataclass
+class NormalModeData:
+    equilibrium_coords: np.ndarray  # (n_atoms, 3) in Angstrom
+    mode_vectors: np.ndarray  # (n_modes, n_atoms, 3) in Angstrom
+    frequencies: np.ndarray | None = None  # (n_modes,)
+    mode_index: int = 0
+    phase: float = 0.0
+    phase_step: float = 0.30
+    amplitude: float = 1.0
 
 
 class MoleculeView(Widget):
@@ -278,14 +302,20 @@ class MoltuiApp(App):
         Binding("escape", "close_panel", "Close panel", show=False),
         Binding("q", "quit", "Quit"),
         Binding("g", "toggle_geometry", "Geom"),
-        Binding("m", "toggle_mo_panel", "MOs"),
+        Binding("m", "cycle_view_mode_next", "Mode+"),
+        Binding("M", "cycle_view_mode_prev", "Mode-"),
         Binding("right_square_bracket", "next_mo", "MO]", show=False),
         Binding("left_square_bracket", "prev_mo", "[MO", show=False),
         Binding("e", "export_png", "Export"),
         Binding("number_sign", "toggle_atom_numbers", "#Nums"),
-        Binding("n", "panel_next", "Next"),
-        Binding("p", "panel_prev", "Prev"),
+        Binding("n", "panel_next", "Next", priority=True),
+        Binding("p", "panel_prev", "Prev", priority=True),
         Binding("V", "toggle_visual", "Visual"),
+        Binding("space", "toggle_playback", "Play"),
+        Binding("f", "next_animation_step", "Step+", show=False),
+        Binding("d", "prev_animation_step", "Step-", show=False),
+        Binding("x", "next_mode", "Mode+", show=False),
+        Binding("z", "prev_mode", "Mode-", show=False),
     ]
 
     def __init__(
@@ -295,6 +325,8 @@ class MoltuiApp(App):
         isosurfaces: list[IsosurfaceMesh] | None = None,
         molden_data=None,
         current_mo: int = 0,
+        trajectory_data: TrajectoryData | None = None,
+        normal_mode_data: NormalModeData | None = None,
     ):
         super().__init__()
         self.molecule = molecule
@@ -307,6 +339,15 @@ class MoltuiApp(App):
         self._mo_switch_timer = None
         self._mo_pending = False
         self._mo_switch_task: asyncio.Task[None] | None = None
+        self.trajectory_data = trajectory_data
+        self.normal_mode_data = normal_mode_data
+        if self.normal_mode_data is not None and self.normal_mode_data.mode_vectors.shape[0] > 0:
+            self.normal_mode_data.mode_index = self._first_vibrational_mode_index()
+        self._view_mode = _VIEW_GEOMETRY
+        self._panel_hidden = False
+        self._playback_timer = None
+        self._is_playing = False
+        self._playback_interval_sec = 0.08
         self.title = self._title_text()
 
     def compose(self) -> ComposeResult:
@@ -315,6 +356,7 @@ class MoltuiApp(App):
             yield MoleculeView()
             yield GeometryPanel()
             yield MOPanel()
+            yield NormalModePanel()
             yield VisualPanel()
         yield Footer()
 
@@ -323,7 +365,7 @@ class MoltuiApp(App):
         view.set_molecule(self.molecule, self._isosurfaces)
         panel = self.query_one(GeometryPanel)
         panel.set_molecule(self.molecule)
-        if self.molden_data is not None:
+        if self.molden_data is not None and self.molden_data.n_mos > 0:
             md = self.molden_data
             mo_panel = self.query_one(MOPanel)
             mo_panel.set_mo_data(
@@ -333,27 +375,91 @@ class MoltuiApp(App):
                 spins=md.mo_spins,
                 current_mo=self.current_mo,
             )
+        if self.normal_mode_data is not None:
+            mode_panel = self.query_one(NormalModePanel)
+            mode_panel.set_mode_data(
+                mode_count=self.normal_mode_data.mode_vectors.shape[0],
+                frequencies=(
+                    self.normal_mode_data.frequencies.tolist()
+                    if self.normal_mode_data.frequencies is not None
+                    else None
+                ),
+                current_mode=self.normal_mode_data.mode_index,
+            )
+        initial_mode = self._available_view_modes()[0]
+        self._set_view_mode(initial_mode, reveal_panel=True)
         view.focus()
 
     def _panel_is_open(self) -> bool:
         return (
             self.query_one(GeometryPanel).has_class("visible")
             or self.query_one(MOPanel).has_class("visible")
+            or self.query_one(NormalModePanel).has_class("visible")
             or self.query_one(VisualPanel).has_class("visible")
         )
 
+    def _available_view_modes(self) -> list[str]:
+        modes: list[str] = []
+        if self.molden_data is not None and self.molden_data.n_mos > 0:
+            modes.append(_VIEW_MO)
+        if self.normal_mode_data is not None:
+            modes.append(_VIEW_NORMAL)
+        modes.append(_VIEW_GEOMETRY)
+        return modes
+
     def check_action(self, action: str, parameters: tuple[object, ...]) -> bool | None:
-        if action in ("toggle_orbitals", "toggle_mo_panel", "next_mo", "prev_mo"):
-            if self.molden_data is None and not self._isosurfaces:
+        if action in ("toggle_mo_panel", "next_mo", "prev_mo"):
+            has_mo = self.molden_data is not None and self.molden_data.n_mos > 0
+            if not has_mo and not self._isosurfaces:
+                return False
+        if action in ("next_mo", "prev_mo", "toggle_orbitals") and self._view_mode != _VIEW_MO:
+            return False
+        if action == "toggle_normal_mode_panel":
+            if self.normal_mode_data is None:
+                return False
+        if action in (
+            "next_mode",
+            "prev_mode",
+            "toggle_playback",
+            "next_animation_step",
+            "prev_animation_step",
+        ):
+            if self._view_mode != _VIEW_NORMAL:
+                return False
+            if not self._has_animation():
                 return False
         if action in ("panel_next", "panel_prev"):
             if not self._panel_is_open():
+                return False
+        if action in ("cycle_view_mode_next", "cycle_view_mode_prev"):
+            if len(self._available_view_modes()) <= 1 and not self._panel_hidden:
                 return False
         return True
 
     def _title_text(self) -> str:
         parts = [Path(self.filepath).name]
-        if self.molden_data is not None:
+        if self._view_mode == _VIEW_GEOMETRY and self.trajectory_data is not None:
+            frame_idx = self.trajectory_data.frame_index + 1
+            n_frames = self.trajectory_data.frames.shape[0]
+            parts.append(f"Frame {frame_idx}/{n_frames}")
+        if self._view_mode == _VIEW_NORMAL and self.normal_mode_data is not None:
+            mode_idx = self.normal_mode_data.mode_index + 1
+            n_modes = self.normal_mode_data.mode_vectors.shape[0]
+            mode_text = f"Mode {mode_idx}/{n_modes}"
+            if (
+                self.normal_mode_data.frequencies is not None
+                and self.normal_mode_data.mode_index < len(self.normal_mode_data.frequencies)
+            ):
+                freq = self.normal_mode_data.frequencies[self.normal_mode_data.mode_index]
+                mode_text += f" {freq:.2f} cm^-1"
+            parts.append(mode_text)
+        if self._view_mode == _VIEW_NORMAL and self._is_playing:
+            parts.append("PLAY")
+        if (
+            self._view_mode == _VIEW_MO
+            and self.molden_data is not None
+            and self.molden_data.n_mos > 0
+        ):
             md = self.molden_data
             energy = md.mo_energies[self.current_mo]
             occ = md.mo_occupations[self.current_mo]
@@ -372,6 +478,126 @@ class MoltuiApp(App):
 
     def _update_title(self) -> None:
         self.title = self._title_text()
+
+    def _has_animation(self) -> bool:
+        if self.trajectory_data is not None and self.trajectory_data.frames.shape[0] > 1:
+            return True
+        if self.normal_mode_data is not None and self.normal_mode_data.mode_vectors.shape[0] > 0:
+            return True
+        return False
+
+    def _is_linear_molecule(self) -> bool:
+        coords = np.array([atom.position for atom in self.molecule.atoms], dtype=np.float64)
+        if coords.shape[0] <= 2:
+            return True
+        centered = coords - coords.mean(axis=0)
+        ref_idx = None
+        for i in range(centered.shape[0]):
+            if np.linalg.norm(centered[i]) > 1e-8:
+                ref_idx = i
+                break
+        if ref_idx is None:
+            return True
+        ref = centered[ref_idx]
+        for i in range(centered.shape[0]):
+            if i == ref_idx:
+                continue
+            if np.linalg.norm(np.cross(ref, centered[i])) > 1e-6:
+                return False
+        return True
+
+    def _first_vibrational_mode_index(self) -> int:
+        if self.normal_mode_data is None:
+            return 0
+        n_atoms = len(self.molecule.atoms)
+        if n_atoms <= 1:
+            return 0
+        n_modes = self.normal_mode_data.mode_vectors.shape[0]
+        if n_modes <= 1:
+            return 0
+
+        expected_zero_modes = 5 if self._is_linear_molecule() else 6
+        freqs = self.normal_mode_data.frequencies
+
+        # If frequencies are available, only skip rigid-body modes when the file
+        # actually appears to include them at the beginning.
+        if freqs is not None and len(freqs) >= expected_zero_modes:
+            leading = np.asarray(freqs[:expected_zero_modes], dtype=np.float64)
+            if np.all(np.abs(leading) < _ZERO_MODE_FREQ_TOL_CM1):
+                return min(expected_zero_modes, n_modes - 1)
+
+        # Many Molden writers store only vibrational modes (already trimmed).
+        return 0
+
+    def _adjacent_mode_index(self, step: int) -> int | None:
+        if self.normal_mode_data is None:
+            return None
+        n_modes = self.normal_mode_data.mode_vectors.shape[0]
+        if n_modes == 0:
+            return None
+        first_vib = self._first_vibrational_mode_index()
+        if first_vib >= n_modes:
+            first_vib = 0
+        start = self.normal_mode_data.mode_index
+        if start < first_vib:
+            start = first_vib
+        n_vib = n_modes - first_vib
+        if n_vib <= 0:
+            return 0
+        rel = (start - first_vib + step) % n_vib
+        return first_vib + rel
+
+    def _apply_active_animation_geometry(self) -> None:
+        if self.trajectory_data is not None:
+            coords = self.trajectory_data.frames[self.trajectory_data.frame_index]
+        elif self.normal_mode_data is not None:
+            mode = self.normal_mode_data.mode_vectors[self.normal_mode_data.mode_index]
+            disp = self.normal_mode_data.amplitude * np.sin(self.normal_mode_data.phase) * mode
+            coords = self.normal_mode_data.equilibrium_coords + disp
+        else:
+            return
+
+        for i, atom in enumerate(self.molecule.atoms):
+            atom.position = coords[i].copy()
+        view = self.query_one(MoleculeView)
+        view._invalidate_cache()
+        self._update_title()
+
+    def _reset_normal_mode_geometry(self) -> None:
+        if self.normal_mode_data is None:
+            return
+        self.normal_mode_data.phase = 0.0
+        for i, atom in enumerate(self.molecule.atoms):
+            atom.position = self.normal_mode_data.equilibrium_coords[i].copy()
+        view = self.query_one(MoleculeView)
+        view._invalidate_cache()
+        self._update_title()
+
+    def _animation_tick(self) -> None:
+        if self.trajectory_data is not None:
+            n_frames = self.trajectory_data.frames.shape[0]
+            if n_frames > 1:
+                self.trajectory_data.frame_index = (self.trajectory_data.frame_index + 1) % n_frames
+        elif self.normal_mode_data is not None:
+            self.normal_mode_data.phase += self.normal_mode_data.phase_step
+        self._apply_active_animation_geometry()
+
+    def _start_playback(self) -> None:
+        if not self._has_animation():
+            return
+        if self._playback_timer is not None:
+            return
+        self._playback_timer = self.set_interval(self._playback_interval_sec, self._animation_tick)
+        self._is_playing = True
+        self._update_title()
+
+    def _stop_playback(self) -> None:
+        if self._playback_timer is None:
+            return
+        self._playback_timer.stop()
+        self._playback_timer = None
+        self._is_playing = False
+        self._update_title()
 
     def action_rotate_up(self) -> None:
         view = self.query_one(MoleculeView)
@@ -492,6 +718,9 @@ class MoltuiApp(App):
 
     def action_toggle_orbitals(self) -> None:
         view = self.query_one(MoleculeView)
+        if not view.show_orbitals and self.normal_mode_data is not None and self._is_playing:
+            self.notify("Stop normal-mode playback before showing orbitals", timeout=2)
+            return
         view.show_orbitals = not view.show_orbitals
         view._invalidate_cache()
 
@@ -505,6 +734,54 @@ class MoltuiApp(App):
         if view.molecule:
             view.camera_distance = max(4.0, view.molecule.radius() * 3.0)
         view._invalidate_cache()
+
+    def action_toggle_playback(self) -> None:
+        if self._is_playing:
+            self._stop_playback()
+            self.notify("Playback paused", timeout=1)
+        else:
+            self._start_playback()
+            self.notify("Playback started", timeout=1)
+
+    def action_next_animation_step(self) -> None:
+        if self.trajectory_data is not None:
+            n_frames = self.trajectory_data.frames.shape[0]
+            if n_frames > 1:
+                self.trajectory_data.frame_index = (self.trajectory_data.frame_index + 1) % n_frames
+        elif self.normal_mode_data is not None:
+            self.normal_mode_data.phase += self.normal_mode_data.phase_step
+        self._apply_active_animation_geometry()
+
+    def action_prev_animation_step(self) -> None:
+        if self.trajectory_data is not None:
+            n_frames = self.trajectory_data.frames.shape[0]
+            if n_frames > 1:
+                self.trajectory_data.frame_index = (self.trajectory_data.frame_index - 1) % n_frames
+        elif self.normal_mode_data is not None:
+            self.normal_mode_data.phase -= self.normal_mode_data.phase_step
+        self._apply_active_animation_geometry()
+
+    def action_next_mode(self) -> None:
+        if self.normal_mode_data is None:
+            return
+        next_idx = self._adjacent_mode_index(1)
+        if next_idx is None:
+            return
+        self.normal_mode_data.mode_index = next_idx
+        self.normal_mode_data.phase = 0.0
+        self.query_one(NormalModePanel).select_mode(next_idx)
+        self._apply_active_animation_geometry()
+
+    def action_prev_mode(self) -> None:
+        if self.normal_mode_data is None:
+            return
+        prev_idx = self._adjacent_mode_index(-1)
+        if prev_idx is None:
+            return
+        self.normal_mode_data.mode_index = prev_idx
+        self.normal_mode_data.phase = 0.0
+        self.query_one(NormalModePanel).select_mode(prev_idx)
+        self._apply_active_animation_geometry()
 
     def action_export_png(self) -> None:
         view = self.query_one(MoleculeView)
@@ -563,6 +840,9 @@ class MoltuiApp(App):
         await asyncio.to_thread(img.save, str(out_path))
         self.notify(f"Saved {out_path}", timeout=3)
 
+    def on_unmount(self) -> None:
+        self._stop_playback()
+
     def _active_panel_table(self) -> DataTable | None:
         """Return the DataTable in the currently visible panel's active tab."""
         geom = self.query_one(GeometryPanel)
@@ -575,30 +855,82 @@ class MoltuiApp(App):
         if mo.has_class("visible"):
             for dt in mo.query(DataTable):
                 return dt
+        mode_panel = self.query_one(NormalModePanel)
+        if mode_panel.has_class("visible"):
+            for dt in mode_panel.query(DataTable):
+                return dt
         return None
+
+    def _emit_active_panel_selection(self, dt: DataTable) -> None:
+        geom = self.query_one(GeometryPanel)
+        if geom.has_class("visible"):
+            geom._emit_current_highlight(dt)
+            return
+        mo = self.query_one(MOPanel)
+        if mo.has_class("visible"):
+            if dt.row_count == 0:
+                return
+            rk = list(dt.rows.keys())[dt.cursor_row]
+            if rk.value is not None:
+                self._set_current_mo(int(rk.value))
+            return
+        mode_panel = self.query_one(NormalModePanel)
+        if mode_panel.has_class("visible"):
+            if dt.row_count == 0:
+                return
+            rk = list(dt.rows.keys())[dt.cursor_row]
+            if rk.value is not None and self.normal_mode_data is not None:
+                self.normal_mode_data.mode_index = int(rk.value)
+                self.normal_mode_data.phase = 0.0
+                self._apply_active_animation_geometry()
 
     def action_panel_next(self) -> None:
         if self.query_one(VisualPanel).has_class("visible"):
             self.screen.focus_next()
             return
         dt = self._active_panel_table()
-        if dt is not None:
-            dt.action_cursor_down()
+        if dt is not None and dt.row_count > 0:
+            target = min(dt.row_count - 1, dt.cursor_row + 1)
+            dt.move_cursor(row=target, scroll=True)
+            self._emit_active_panel_selection(dt)
 
     def action_panel_prev(self) -> None:
         if self.query_one(VisualPanel).has_class("visible"):
             self.screen.focus_previous()
             return
         dt = self._active_panel_table()
-        if dt is not None:
-            dt.action_cursor_up()
+        if dt is not None and dt.row_count > 0:
+            target = max(0, dt.cursor_row - 1)
+            dt.move_cursor(row=target, scroll=True)
+            self._emit_active_panel_selection(dt)
+
+    def on_key(self, event: Key) -> None:
+        # Ensure n/p panel navigation works while DataTable has focus.
+        if event.key not in ("n", "p"):
+            return
+        if self.query_one(VisualPanel).has_class("visible"):
+            return
+        if not self._panel_is_open():
+            return
+        if event.key == "n":
+            self.action_panel_next()
+        else:
+            self.action_panel_prev()
+        event.stop()
 
     def action_close_panel(self) -> None:
         geom = self.query_one(GeometryPanel)
         mo = self.query_one(MOPanel)
+        mode_panel = self.query_one(NormalModePanel)
         vis = self.query_one(VisualPanel)
-        if geom.has_class("visible") or mo.has_class("visible") or vis.has_class("visible"):
+        if (
+            geom.has_class("visible")
+            or mo.has_class("visible")
+            or mode_panel.has_class("visible")
+            or vis.has_class("visible")
+        ):
             self._close_panels()
+            self._panel_hidden = True
             view = self.query_one(MoleculeView)
             view._invalidate_cache()
             view.focus()
@@ -608,50 +940,105 @@ class MoltuiApp(App):
         view = self.query_one(MoleculeView)
         geom = self.query_one(GeometryPanel)
         mo = self.query_one(MOPanel)
+        mode_panel = self.query_one(NormalModePanel)
         vis = self.query_one(VisualPanel)
         if geom.has_class("visible"):
             geom.remove_class("visible")
             view.highlighted_atoms = set()
         if mo.has_class("visible"):
             mo.remove_class("visible")
+        if mode_panel.has_class("visible"):
+            mode_panel.remove_class("visible")
         if vis.has_class("visible"):
             vis.remove_class("visible")
 
     def action_toggle_geometry(self) -> None:
-        panel = self.query_one(GeometryPanel)
-        was_visible = panel.has_class("visible")
-        self._close_panels()
-        view = self.query_one(MoleculeView)
-        if not was_visible:
-            panel.add_class("visible")
-            view.show_orbitals = False
-            for dt in panel.query(DataTable):
-                dt.focus()
-                panel._emit_current_highlight(dt)
-                break
-        else:
-            view.focus()
-        view._invalidate_cache()
+        self._set_view_mode(_VIEW_GEOMETRY)
 
-    def action_toggle_mo_panel(self) -> None:
-        if self.molden_data is None:
-            self.notify("No MO data (molden files only)", timeout=2)
+    def action_cycle_view_mode_next(self) -> None:
+        modes = self._available_view_modes()
+        if len(modes) <= 1:
+            if self._panel_hidden and modes:
+                self._set_view_mode(modes[0], reveal_panel=True)
             return
-        mo_panel = self.query_one(MOPanel)
-        was_visible = mo_panel.has_class("visible")
-        self._close_panels()
+        idx = modes.index(self._view_mode) if self._view_mode in modes else 0
+        self._set_view_mode(modes[(idx + 1) % len(modes)], reveal_panel=True)
+
+    def action_cycle_view_mode_prev(self) -> None:
+        modes = self._available_view_modes()
+        if len(modes) <= 1:
+            if self._panel_hidden and modes:
+                self._set_view_mode(modes[0], reveal_panel=True)
+            return
+        idx = modes.index(self._view_mode) if self._view_mode in modes else 0
+        self._set_view_mode(modes[(idx - 1) % len(modes)], reveal_panel=True)
+
+    def _focus_panel_table(self, panel_widget, emit_fn) -> None:
+        for dt in panel_widget.query(DataTable):
+            dt.focus()
+            emit_fn(dt)
+            break
+
+    def _set_view_mode(self, mode: str, *, reveal_panel: bool = True) -> None:
+        if mode not in self._available_view_modes():
+            return
         view = self.query_one(MoleculeView)
-        if not was_visible:
-            mo_panel.add_class("visible")
+        self._close_panels()
+        if reveal_panel:
+            self._panel_hidden = False
+        self._view_mode = mode
+
+        if mode == _VIEW_GEOMETRY:
+            if self._is_playing:
+                self._stop_playback()
+            if self.normal_mode_data is not None:
+                self._reset_normal_mode_geometry()
+            panel = self.query_one(GeometryPanel)
+            if not self._panel_hidden:
+                panel.add_class("visible")
+            view.show_orbitals = False
+            if not self._panel_hidden:
+                self._focus_panel_table(panel, panel._emit_current_highlight)
+        elif mode == _VIEW_MO:
+            if self._is_playing:
+                self._stop_playback()
+            if self.normal_mode_data is not None:
+                self._reset_normal_mode_geometry()
+            mo_panel = self.query_one(MOPanel)
+            if not self._panel_hidden:
+                mo_panel.add_class("visible")
             view.show_orbitals = True
             mo_panel.select_mo(self.current_mo, center=True)
-            for dt in mo_panel.query(DataTable):
-                dt.focus()
-                mo_panel.emit_current_highlight(dt)
-                break
-        else:
-            view.focus()
+            if not self._panel_hidden:
+                self._focus_panel_table(mo_panel, mo_panel.emit_current_highlight)
+        elif mode == _VIEW_NORMAL:
+            nm = self.normal_mode_data
+            if nm is None:
+                return
+            mode_panel = self.query_one(NormalModePanel)
+            if not self._panel_hidden:
+                mode_panel.add_class("visible")
+            view.show_orbitals = False
+            mode_panel.select_mode(nm.mode_index, center=True)
+            if not self._panel_hidden:
+                self._focus_panel_table(mode_panel, mode_panel.emit_current_highlight)
+            if not self._is_playing:
+                self._start_playback()
+
         view._invalidate_cache()
+        self._update_title()
+
+    def action_toggle_mo_panel(self) -> None:
+        if self.molden_data is None or self.molden_data.n_mos == 0:
+            self.notify("No MO data (molden files only)", timeout=2)
+            return
+        self._set_view_mode(_VIEW_MO)
+
+    def action_toggle_normal_mode_panel(self) -> None:
+        if self.normal_mode_data is None:
+            self.notify("No normal mode data", timeout=2)
+            return
+        self._set_view_mode(_VIEW_NORMAL)
 
     def action_toggle_visual(self) -> None:
         vis = self.query_one(VisualPanel)
@@ -709,7 +1096,7 @@ class MoltuiApp(App):
             view = self.query_one(MoleculeView)
             view.isosurfaces = self._isosurfaces
             view._invalidate_cache()
-        elif self.molden_data is not None:
+        elif self.molden_data is not None and self.molden_data.n_mos > 0:
             self._switch_mo()
 
     def on_visual_panel_lighting_changed(self, event: VisualPanel.LightingChanged) -> None:
@@ -729,6 +1116,13 @@ class MoltuiApp(App):
     def on_mopanel_moselected(self, event: MOPanel.MOSelected) -> None:
         self._set_current_mo(event.mo_index)
 
+    def on_normalmodepanel_modeselected(self, event: NormalModePanel.ModeSelected) -> None:
+        if self.normal_mode_data is None:
+            return
+        self.normal_mode_data.mode_index = event.mode_index
+        self.normal_mode_data.phase = 0.0
+        self._apply_active_animation_geometry()
+
     def on_geometry_panel_highlight_atoms(self, event: GeometryPanel.HighlightAtoms) -> None:
         view = self.query_one(MoleculeView)
         view.highlighted_atoms = set(event.atom_indices)
@@ -736,7 +1130,7 @@ class MoltuiApp(App):
 
     def _set_current_mo(self, mo_idx: int) -> None:
         """Single entry point for all MO changes."""
-        if self.molden_data is None:
+        if self.molden_data is None or self.molden_data.n_mos == 0:
             return
         mo_idx = max(0, min(mo_idx, self.molden_data.n_mos - 1))
         if mo_idx == self.current_mo:
@@ -773,6 +1167,8 @@ class MoltuiApp(App):
             self._switch_mo()
 
     def _switch_mo(self) -> None:
+        if self.molden_data is None or self.molden_data.n_mos == 0:
+            return
         self._mo_switch_task = asyncio.create_task(self._switch_mo_async(self.current_mo))
 
     async def _switch_mo_async(self, target_mo: int) -> None:
@@ -877,6 +1273,8 @@ def run():
     isosurfaces: list[IsosurfaceMesh] = []
     molden_data = None
     current_mo = 0
+    trajectory_data: TrajectoryData | None = None
+    normal_mode_data: NormalModeData | None = None
     gbw_tmpdir: Path | None = None
 
     if filetype == "gbw":
@@ -904,9 +1302,21 @@ def run():
 
             molden_data = load_molden_data(filepath)
             molecule = molden_data.molecule
-            current_mo = molden_data.homo_idx
-            cube_data = evaluate_mo(molden_data, current_mo)
-            isosurfaces = extract_isosurfaces(cube_data)
+            if molden_data.normal_modes is not None:
+                eq_coords = np.array([atom.position.copy() for atom in molecule.atoms])
+                normal_mode_data = NormalModeData(
+                    equilibrium_coords=eq_coords,
+                    mode_vectors=molden_data.normal_modes,
+                    frequencies=molden_data.mode_frequencies,
+                )
+            if molden_data.n_mos > 0:
+                current_mo = molden_data.homo_idx
+                cube_data = evaluate_mo(molden_data, current_mo)
+                isosurfaces = extract_isosurfaces(cube_data)
+        elif filetype == "xyz":
+            traj = parse_xyz_trajectory(filepath)
+            molecule = traj.molecule
+            trajectory_data = TrajectoryData(frames=traj.frames)
         else:
             molecule = load_molecule(filepath)
 
@@ -916,6 +1326,8 @@ def run():
             isosurfaces=isosurfaces,
             molden_data=molden_data,
             current_mo=current_mo,
+            trajectory_data=trajectory_data,
+            normal_mode_data=normal_mode_data,
         )
         app._cube_data = cube_data_for_app
         app.run()

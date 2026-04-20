@@ -8,7 +8,7 @@ from pathlib import Path
 import numpy as np
 import pytest
 
-from moltui.parsers import load_molecule, parse_cube_data, parse_xyz
+from moltui.parsers import load_molecule, parse_cube_data, parse_xyz, parse_xyz_trajectory
 
 
 def _write_xyz(tmp_path: Path, name: str, body: str) -> Path:
@@ -102,6 +102,37 @@ class TestParseXYZ:
         for atom in mol.atoms:
             assert atom.position.shape == (3,)
             assert atom.position.dtype == np.float64
+
+
+class TestParseXYZTrajectory:
+    def test_parses_multiple_frames(self, tmp_path: Path):
+        xyz = _write_xyz(
+            tmp_path,
+            "traj.xyz",
+            (
+                "3\nframe1\n"
+                "O 0.0000 0.0000 0.0000\n"
+                "H 0.7586 0.0000 0.5043\n"
+                "H -0.7586 0.0000 0.5043\n"
+                "3\nframe2\n"
+                "O 0.0100 0.0000 0.0000\n"
+                "H 0.7686 0.0000 0.5043\n"
+                "H -0.7486 0.0000 0.5043\n"
+            ),
+        )
+        traj = parse_xyz_trajectory(xyz)
+        assert traj.frames.shape == (2, 3, 3)
+        assert len(traj.molecule.atoms) == 3
+        assert np.isclose(traj.frames[1, 0, 0], 0.01)
+
+    def test_rejects_inconsistent_symbols(self, tmp_path: Path):
+        xyz = _write_xyz(
+            tmp_path,
+            "bad_traj.xyz",
+            ("2\nframe1\nH 0.0 0.0 0.0\nO 0.0 0.0 1.0\n2\nframe2\nO 0.0 0.0 0.0\nH 0.0 0.0 1.0\n"),
+        )
+        with pytest.raises(ValueError, match="preserve atom ordering and symbols"):
+            parse_xyz_trajectory(xyz)
 
 
 # --- Cube parsing ---

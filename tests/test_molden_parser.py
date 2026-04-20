@@ -3,7 +3,6 @@ from __future__ import annotations
 from pathlib import Path
 
 import numpy as np
-import pytest
 
 from moltui.gto import eval_gto, parse_molden
 from moltui.molden import load_molden_data
@@ -77,8 +76,8 @@ Occup= 2.0
     assert basis.spherical[4] is True
 
 
-def test_parse_molden_ignores_vibrational_sections(tmp_path: Path) -> None:
-    """Vibrational sections should be skipped while parsing MO data."""
+def test_parse_molden_reads_vibrational_sections(tmp_path: Path) -> None:
+    """Vibrational sections should be parsed alongside MO data."""
     path = _write_molden(
         tmp_path,
         """[Molden Format]
@@ -110,6 +109,10 @@ Occup= 2.0
 
     assert basis.mo_coefficients.shape == (1, 1)
     assert basis.atom_coords_bohr.shape == (1, 3)
+    assert basis.frequencies is not None
+    assert basis.normal_modes is not None
+    assert np.isclose(basis.frequencies[0], 1000.0)
+    assert basis.normal_modes.shape == (1, 1, 3)
 
 
 def test_eval_gto_cartesian_g_shell(tmp_path: Path) -> None:
@@ -189,8 +192,8 @@ Occup= 2.0
     assert ao.shape == (1, 9)
 
 
-def test_load_molden_data_rejects_normal_modes_only_file(tmp_path: Path) -> None:
-    """Normal-modes-only Molden files should fail with a clear user message."""
+def test_load_molden_data_accepts_normal_modes_only_file(tmp_path: Path) -> None:
+    """Normal-modes-only Molden files should load geometry and mode vectors."""
     path = _write_molden(
         tmp_path,
         """[MOLDEN FORMAT]
@@ -222,8 +225,10 @@ vibration 1
 """,
     )
 
-    with pytest.raises(
-        ValueError,
-        match="only contains normal modes and not geometries or orbitals",
-    ):
-        load_molden_data(path)
+    data = load_molden_data(path)
+    assert len(data.molecule.atoms) == 3
+    assert data.n_mos == 0
+    assert data.normal_modes is not None
+    assert data.normal_modes.shape[0] == 1
+    assert data.mode_frequencies is not None
+    assert np.isclose(data.mode_frequencies[-1], 0.0)
