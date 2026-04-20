@@ -199,6 +199,13 @@ class GeometryPanel(Widget):
     def on_data_table_row_highlighted(self, event: DataTable.RowHighlighted) -> None:
         if self._populating or not self.has_class("visible"):
             return
+        # During table repopulation (e.g. after sort toggle), Textual can emit
+        # highlight events for non-active tables. Only the active tab should
+        # control molecule highlighting.
+        tabs = self.query_one(TabbedContent)
+        active_table = self._table_for_tab(tabs.active)
+        if event.data_table is not active_table:
+            return
         if event.row_key is None or event.row_key.value is None:
             return
         indices = tuple(int(x) for x in event.row_key.value.split("-"))
