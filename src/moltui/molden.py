@@ -20,6 +20,8 @@ class MoldenData:
     n_mos: int
     homo_idx: int
     _basis: MoldenBasis = field(repr=False)
+    mode_frequencies: np.ndarray | None = None  # (n_modes,)
+    normal_modes: np.ndarray | None = None  # (n_modes, n_atoms, 3) in Angstrom
 
 
 def parse_molden_atoms(filepath: str | Path) -> Molecule:
@@ -56,17 +58,8 @@ def load_molden_data(filepath: str | Path) -> MoldenData:
     """Load full molden data including MO coefficients."""
     filepath = Path(filepath)
     basis = parse_molden(filepath)
-    file_text = filepath.read_text().lower()
-
-    # Reject vibrational-only Molden files up front with a clear message.
-    has_normal_modes = any(
-        tag in file_text for tag in ("[fr-coord]", "[fr-norm-coord]", "[freq]", "[n_freq]")
-    )
-    has_required_orbital_sections = all(tag in file_text for tag in ("[atoms]", "[gto]", "[mo]"))
-    if has_normal_modes and not has_required_orbital_sections:
-        raise ValueError(
-            "This Molden file only contains normal modes and not geometries or orbitals."
-        )
+    if basis.atom_coords_bohr.size == 0 or not basis.atom_symbols:
+        raise ValueError("Molden file does not contain atomic coordinates")
 
     # Build Molecule
     atoms = []
@@ -77,9 +70,19 @@ def load_molden_data(filepath: str | Path) -> MoldenData:
     molecule = Molecule(atoms=atoms, bonds=[])
     molecule.detect_bonds()
 
-    # Find HOMO
-    occ_indices = np.where(basis.mo_occupations > 0.5)[0]
+    # Find HOMO (if MO data exists)
+    n_mos = basis.mo_coefficients.shape[1] if basis.mo_coefficients.ndim == 2 else 0
+    occ_indices = np.where(basis.mo_occupations > 0.5)[0] if n_mos > 0 else np.array([])
     homo_idx = int(occ_indices[-1]) if len(occ_indices) > 0 else 0
+
+    normal_modes = None
+    mode_frequencies = None
+    if basis.normal_modes is not None:
+        if basis.normal_modes.shape[1] != len(atoms):
+            raise ValueError("Normal-mode vectors do not match atom count")
+        normal_modes = basis.normal_modes * BOHR_TO_ANGSTROM
+        if basis.frequencies is not None:
+            mode_frequencies = basis.frequencies[: normal_modes.shape[0]]
 
     return MoldenData(
         molecule=molecule,
@@ -87,8 +90,10 @@ def load_molden_data(filepath: str | Path) -> MoldenData:
         mo_occupations=basis.mo_occupations,
         mo_symmetries=basis.mo_symmetries,
         mo_spins=basis.mo_spins,
-        n_mos=basis.mo_coefficients.shape[1],
+        n_mos=n_mos,
         homo_idx=homo_idx,
+        mode_frequencies=mode_frequencies,
+        normal_modes=normal_modes,
         _basis=basis,
     )
 
@@ -100,6 +105,8 @@ def evaluate_mo(
     padding: float = 5.0,
 ) -> CubeData:
     """Evaluate a molecular orbital on a 3D grid. Returns CubeData."""
+    if molden_data.n_mos == 0:
+        raise ValueError("No molecular orbitals available in this Molden file")
     basis = molden_data._basis
     coords = basis.atom_coords_bohr
 

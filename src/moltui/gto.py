@@ -60,6 +60,8 @@ class MoldenBasis:
     mo_symmetries: list[str]
     mo_spins: list[str]
     spherical: dict[int, bool]  # l -> True if spherical
+    frequencies: np.ndarray | None = None  # (n_modes,)
+    normal_modes: np.ndarray | None = None  # (n_modes, n_atoms, 3)
 
 
 # ---------------------------------------------------------------------------
@@ -84,6 +86,8 @@ def parse_molden(filepath: str | Path) -> MoldenBasis:
     mo_symmetries: list[str] = []
     mo_spins: list[str] = []
     mo_coeffs_list: list[list[float]] = []
+    frequencies: list[float] = []
+    normal_modes: list[np.ndarray] = []
     # Default: cartesian for d and above
     spherical: dict[int, bool] = {2: False, 3: False, 4: False}
 
@@ -220,10 +224,80 @@ def parse_molden(filepath: str | Path) -> MoldenBasis:
                 mo_coeffs_list.append(current_coeffs)
             continue
 
+        # --- [FR-COORD] section ---
+        if tag == "fr-coord":
+            i += 1
+            fr_symbols: list[str] = []
+            fr_coords: list[list[float]] = []
+            while i < len(lines) and _section_tag(lines[i]) is None:
+                parts = lines[i].split()
+                if len(parts) >= 4:
+                    fr_symbols.append(parts[0])
+                    fr_coords.append(
+                        [_parse_float(parts[1]), _parse_float(parts[2]), _parse_float(parts[3])]
+                    )
+                i += 1
+            if not atom_symbols and fr_symbols:
+                atom_symbols = fr_symbols
+                atom_coords = fr_coords
+            continue
+
+        # --- [FREQ] section ---
+        if tag == "freq":
+            i += 1
+            while i < len(lines) and _section_tag(lines[i]) is None:
+                for token in lines[i].split():
+                    frequencies.append(_parse_float(token))
+                i += 1
+            continue
+
+        # --- [FR-NORM-COORD] section ---
+        if tag == "fr-norm-coord":
+            i += 1
+            mode_vectors: list[list[float]] | None = None
+            while i < len(lines) and _section_tag(lines[i]) is None:
+                mline = lines[i].strip()
+                if not mline:
+                    i += 1
+                    continue
+                if mline.lower().startswith("vibration"):
+                    if mode_vectors:
+                        normal_modes.append(np.array(mode_vectors, dtype=np.float64))
+                    mode_vectors = []
+                    i += 1
+                    continue
+                parts = mline.split()
+                floats = []
+                for token in parts:
+                    try:
+                        floats.append(_parse_float(token))
+                    except ValueError:
+                        pass
+                if len(floats) >= 3:
+                    if mode_vectors is None:
+                        mode_vectors = []
+                    mode_vectors.append(floats[-3:])
+                i += 1
+            if mode_vectors:
+                normal_modes.append(np.array(mode_vectors, dtype=np.float64))
+            continue
+
         i += 1
 
     coords_arr = np.array(atom_coords)
-    mo_coeff_arr = np.array(mo_coeffs_list).T  # (nao, nmo)
+    if mo_coeffs_list:
+        mo_coeff_arr = np.array(mo_coeffs_list, dtype=np.float64).T  # (nao, nmo)
+    else:
+        mo_coeff_arr = np.zeros((0, 0), dtype=np.float64)
+
+    freqs_arr = np.array(frequencies, dtype=np.float64) if frequencies else None
+    if normal_modes:
+        mode_lengths = {mode.shape[0] for mode in normal_modes}
+        if len(mode_lengths) != 1:
+            raise ValueError("Inconsistent mode vector lengths in [FR-NORM-COORD]")
+        normal_modes_arr: np.ndarray | None = np.stack(normal_modes, axis=0)
+    else:
+        normal_modes_arr = None
 
     return MoldenBasis(
         atom_symbols=atom_symbols,
@@ -235,6 +309,8 @@ def parse_molden(filepath: str | Path) -> MoldenBasis:
         mo_symmetries=mo_symmetries,
         mo_spins=mo_spins,
         spherical=spherical,
+        frequencies=freqs_arr,
+        normal_modes=normal_modes_arr,
     )
 
 

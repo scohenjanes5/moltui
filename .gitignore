@@ -11,3 +11,6 @@ wheels/
 
 # Tool-specific local config
 .python-version
+
+examples/
+archive/

@@ -1,0 +1,140 @@
+#!/usr/bin/env python3
+"""Regression test for initial focus when opening the visual panel."""
+
+from __future__ import annotations
+
+import sys
+import types
+
+import numpy as np
+import pytest
+
+
+def _install_skimage_stub() -> None:
+    """Provide a lightweight skimage stub so app imports in test envs."""
+    if "skimage.measure" in sys.modules:
+        return
+    skimage = types.ModuleType("skimage")
+    measure = types.ModuleType("skimage.measure")
+
+    def _marching_cubes(*_args, **_kwargs):  # pragma: no cover - never used in this test
+        raise RuntimeError("marching_cubes stub called unexpectedly")
+
+    measure.marching_cubes = _marching_cubes
+    skimage.measure = measure
+    sys.modules["skimage"] = skimage
+    sys.modules["skimage.measure"] = measure
+
+
+@pytest.mark.asyncio
+async def test_opening_visual_panel_focuses_style_selector_when_isovalue_hidden() -> None:
+    _install_skimage_stub()
+
+    from moltui.app import MoltuiApp
+    from moltui.elements import Atom, Molecule, get_element
+    from moltui.visual_panel import VisualPanel, _NavRadioSet
+
+    atoms = [
+        Atom(get_element("O"), np.array([0.0, 0.0, 0.0])),
+        Atom(get_element("H"), np.array([0.9, 0.0, 0.0])),
+        Atom(get_element("H"), np.array([-0.3, 0.8, 0.0])),
+    ]
+    molecule = Molecule(atoms=atoms, bonds=[])
+    molecule.detect_bonds()
+    app = MoltuiApp(molecule=molecule, filepath="sample.xyz")
+
+    async with app.run_test() as pilot:
+        await pilot.pause()
+        visual_panel = app.query_one(VisualPanel)
+        assert not visual_panel.has_class("visible")
+
+        await pilot.press("V")
+        await pilot.pause()
+
+        style_selector = visual_panel.query_one(_NavRadioSet)
+        assert visual_panel.has_class("visible")
+        assert style_selector.has_focus
+
+
+@pytest.mark.asyncio
+async def test_opening_visual_panel_focuses_isovalue_when_visible() -> None:
+    _install_skimage_stub()
+
+    from moltui.app import MoltuiApp
+    from moltui.elements import Atom, Molecule, get_element
+    from moltui.isosurface import IsosurfaceMesh
+    from moltui.visual_panel import Slider, VisualPanel
+
+    atoms = [
+        Atom(get_element("O"), np.array([0.0, 0.0, 0.0])),
+        Atom(get_element("H"), np.array([0.9, 0.0, 0.0])),
+        Atom(get_element("H"), np.array([-0.3, 0.8, 0.0])),
+    ]
+    molecule = Molecule(atoms=atoms, bonds=[])
+    molecule.detect_bonds()
+    app = MoltuiApp(molecule=molecule, filepath="sample.xyz")
+    app._isosurfaces = [
+        IsosurfaceMesh(
+            vertices=np.zeros((3, 3), dtype=np.float64),
+            faces=np.zeros((1, 3), dtype=np.int32),
+            normals=np.zeros((3, 3), dtype=np.float64),
+            color=(255, 135, 0),
+        )
+    ]
+
+    async with app.run_test() as pilot:
+        await pilot.pause()
+        visual_panel = app.query_one(VisualPanel)
+        assert not visual_panel.has_class("visible")
+
+        await pilot.press("V")
+        await pilot.pause()
+
+        isovalue = visual_panel.query_one("#slider-isovalue", Slider)
+        assert visual_panel.has_class("visible")
+        assert isovalue.has_focus
+
+
+@pytest.mark.asyncio
+async def test_tab_and_shift_tab_adjust_visual_slider_value() -> None:
+    _install_skimage_stub()
+
+    from moltui.app import MoltuiApp
+    from moltui.elements import Atom, Molecule, get_element
+    from moltui.isosurface import IsosurfaceMesh
+    from moltui.visual_panel import Slider, VisualPanel
+
+    atoms = [
+        Atom(get_element("O"), np.array([0.0, 0.0, 0.0])),
+        Atom(get_element("H"), np.array([0.9, 0.0, 0.0])),
+        Atom(get_element("H"), np.array([-0.3, 0.8, 0.0])),
+    ]
+    molecule = Molecule(atoms=atoms, bonds=[])
+    molecule.detect_bonds()
+    app = MoltuiApp(molecule=molecule, filepath="sample.xyz")
+    app._isosurfaces = [
+        IsosurfaceMesh(
+            vertices=np.zeros((3, 3), dtype=np.float64),
+            faces=np.zeros((1, 3), dtype=np.int32),
+            normals=np.zeros((3, 3), dtype=np.float64),
+            color=(255, 135, 0),
+        )
+    ]
+
+    async with app.run_test() as pilot:
+        await pilot.pause()
+        await pilot.press("V")
+        await pilot.pause()
+
+        visual_panel = app.query_one(VisualPanel)
+        isovalue = visual_panel.query_one("#slider-isovalue", Slider)
+        assert isovalue.has_focus
+
+        start = isovalue.value
+        await pilot.press("tab")
+        await pilot.pause()
+        assert isovalue.value > start
+
+        await pilot.press("shift+tab")
+        await pilot.pause()
+        assert isovalue.value == pytest.approx(start)

@@ -1,6 +1,6 @@
 # MolTUI
 
-**MolTUI** is a terminal molecular viewer for the **XYZ**, **Zmat**, **Molden**, **Gaussian Cube** and **ORCA GBW** file format designed for **quick inspection** of **geometries** and **orbitals** directly in the **terminal** using **Unicode** characters.
+**MolTUI** is a terminal molecular viewer for the **XYZ**, **Zmat**, **Molden**, **Gaussian Cube**, **Orca GBW HESS** file format designed for **quick inspection** of **geometries**, **orbitals** and **normal modes** directly in the **terminal** using **Unicode** characters.
 Ideal for **remote SSH sessions** and **lightweight analyses**.
 
 <img width="480" height="480" alt="benzene" src="https://github.com/user-attachments/assets/c71de594-9dd3-4cb4-9754-e86dc663f730" />
@@ -21,21 +21,44 @@ moltui <file>
 
 ## Features
 
+**MolTUI** is organized in a series of **modes** that can be **cycled** using the `m` (forward) and `M` (backward) keys.
+Each mode opens a respective **sidebar** which can be **toggled** on and off with `S`.
+The modes consist of **molecular orbitals**, **normal modes** and **geometry** and availability depends on the file format that was opened.
+
+
 ### Visualize Orbitals
 
 - The **rendering** of orbitals can be toggled via `o`.
-- Molden and GBW files can contain **multiple molecular orbitals**. **Toggle** the orbital **sidebar** with `m`. **Cycle** through MOs with `n`ext and `p`rev (or via `[` and `]` even when the sidebar is hidden).
+- **Molden** and **GBW** files can contain **multiple molecular orbitals**. **Cycle** through MOs with `n`ext and `p`rev.
 
 <img width="1512" height="926" alt="image" src="https://github.com/user-attachments/assets/4c1743ba-aff0-4683-92a7-7ebfaa361258" />
 
 ### Analyze Geometry
 
-- **Bond lengths, angles and dihedrals** can be viewed using the `g`eomtry key which opens a sidebar. Navigate between tabs via `<tab>`.
+- **Bond lengths, angles and dihedrals** can be viewed using the `g`eometry key which opens a sidebar. Navigate between tabs via `<tab>`.
 - The quantity is **highlighted in yellow** on the molecule.
-- **Sort** the quantity in ascending order via `s`.
+- **Sort** the quantity in increasing magnitude via `s`.
 - **Atom indices** can be toggled via `#`.
 
 <img width="1510" height="923" alt="image" src="https://github.com/user-attachments/assets/8a6dab9a-d377-4d16-bfe1-89c83d0763a1" />
+
+### Animations
+
+#### Multi-XYZ
+
+**Trajectories** can be provided in the **multi-XYZ** file format (essentially multiple XYZ files concatenated together).
+**Toggle** a looping **animation** of the trajectory using `<space>` and **cycle** individual **frames** using `[` and `]`.
+The **geometry** sidebar values **updates live** with the **current frame**'s geometry.
+
+<img width="1200" height="733" alt="geom-opt" src="https://github.com/user-attachments/assets/b66d6cfb-c4ae-4c56-ba9c-3c26a4fcdf20" />
+
+#### Normal Modes
+
+**Normal modes** can be provided either via the **Molden** or Orca `.hess` file formats.
+**Animation** playing can be **toggled** with `<space>`.
+
+<img width="1920" height="1080" alt="normal-modes2" src="https://github.com/user-attachments/assets/c13326ff-e24e-46d6-8b24-818b18bac73c" />
+
 
 ### Export to PNG Format
 
@@ -64,8 +87,9 @@ Toggle between **light** and **dark** mode with `i`.
 
 ## Supported formats
 
-- **Structures Only**: **XYZ**, Gaussian **ZMAT**.
-- **Structures and Orbitals**: **Molden**, Gaussian **Cube**, Orca **GBW**¹.
+- **Structures**: **XYZ**, Gaussian **ZMAT**.
+- **Orbitals**: **Molden**, Gaussian **Cube**, Orca **GBW**¹.
+- **Normal Modes**: **Molden**, Orca **HESS**.
 
 ¹ Requires `orca_2mkl` in `PATH`
 
@@ -97,19 +121,31 @@ Toggle between **light** and **dark** mode with `i`.
 
 | Key | Action |
 |-----|--------|
-| `g` | **Geometry** panel (bonds, angles, dihedrals) |
-| `m` | **MO** panel (molecular orbitals) |
-| `V` | **Visual settings** panel (style, sizes, lighting) |
-| `[`, `]` | **Previous/next** MO |
-| `n/p` | **Navigate** panel entries |
-| `Esc` | **Close** panel |
+| `m` / `M` | Cycle sidebar **mode** forward/backward (Geometry, MO, Normal Modes) |
+| `S` | Toggle current **sidebar** (hide/show) |
+| `V` | Toggle **Visual settings** panel |
+| `n/p` | **Next/previous** row in the active sidebar table |
+
+### Geometry panel
+
+| Key | Action |
+|-----|--------|
+| `Tab/Shift+Tab` | Switch **Bonds/Angles/Dihedrals** tab |
+| `s` | Toggle **sort by value** for active tab |
 
 ### Visual panel
 
 | Key | Action |
 |-----|--------|
-| `n/p` | **Move** between controls |
-| `Tab/Shift+Tab` | **Adjust value** (slider) or **switch option** (style) |
+| `n/p` | Move focus to **next/previous** control |
+| `Tab/Shift+Tab` | **Increase/decrease** focused slider, or cycle style option |
+
+### Animation and modes
+
+| Key | Action |
+|-----|--------|
+| `Space` | Toggle **play/pause** trajectory or normal mode animation |
+| `[` / `]` | Previous/next **animation step** (frame/phase) |
 
 ### General
 

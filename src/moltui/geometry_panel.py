@@ -50,6 +50,18 @@ class GeometryPanel(Widget):
         if self.is_mounted:
             self._populate_tables()
 
+    def refresh_measurements(self) -> None:
+        """Recompute displayed geometry values while preserving table selection."""
+        if self._molecule is None or not self.is_mounted:
+            return
+        tab_ids = ("tab-bonds", "tab-angles", "tab-dihedrals")
+        selected_row_keys = {
+            tab_id: self._current_row_key_value(self._table_for_tab(tab_id)) for tab_id in tab_ids
+        }
+        self._populate_tables(selected_row_keys)
+        tabs = self.query_one(TabbedContent)
+        self._emit_current_highlight(self._table_for_tab(tabs.active))
+
     def on_mount(self) -> None:
         if self._molecule is not None:
             self._populate_tables()
@@ -182,7 +194,10 @@ class GeometryPanel(Widget):
 
     def _emit_current_highlight(self, dt: DataTable) -> None:
         """Emit highlight for the currently selected row in the given table."""
-        if not self.has_class("visible") or dt.row_count == 0:
+        if not self.has_class("visible"):
+            return
+        if dt.row_count == 0:
+            self.post_message(self.HighlightAtoms(()))
             return
         rk = list(dt.rows.keys())[dt.cursor_row]
         if rk.value is not None:
@@ -198,6 +213,13 @@ class GeometryPanel(Widget):
 
     def on_data_table_row_highlighted(self, event: DataTable.RowHighlighted) -> None:
         if self._populating or not self.has_class("visible"):
+            return
+        # During table repopulation (e.g. after sort toggle), Textual can emit
+        # highlight events for non-active tables. Only the active tab should
+        # control molecule highlighting.
+        tabs = self.query_one(TabbedContent)
+        active_table = self._table_for_tab(tabs.active)
+        if event.data_table is not active_table:
             return
         if event.row_key is None or event.row_key.value is None:
             return

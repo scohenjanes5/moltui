@@ -17,23 +17,242 @@ class CubeData:
     data: np.ndarray  # (n1, n2, n3) volumetric data
 
 
+@dataclass
+class XYZTrajectory:
+    molecule: Molecule
+    frames: np.ndarray  # (n_frames, n_atoms, 3) in Angstrom
+
+
+@dataclass
+class HessData:
+    molecule: Molecule
+    frequencies: np.ndarray | None = None  # (n_modes,)
+    normal_modes: np.ndarray | None = None  # (n_modes, n_atoms, 3) in Angstrom
+
+
+def _parse_float(token: str) -> float:
+    return float(token.replace("D", "E").replace("d", "e"))
+
+
+def _parse_orca_hess_sections(text: str) -> dict[str, list[str]]:
+    sections: dict[str, list[str]] = {}
+    current: str | None = None
+    for raw_line in text.splitlines():
+        stripped = raw_line.strip()
+        if stripped.startswith("$"):
+            current = stripped[1:].strip().lower()
+            sections.setdefault(current, [])
+            continue
+        if current is not None:
+            sections[current].append(raw_line)
+    return sections
+
+
+def _parse_orca_hess_block_matrix(
+    lines: list[str], n_rows: int, n_cols: int, section_name: str
+) -> np.ndarray:
+    matrix = np.zeros((n_rows, n_cols), dtype=np.float64)
+    filled = np.zeros((n_rows, n_cols), dtype=bool)
+    col_indices: list[int] | None = None
+
+    for line in lines:
+        stripped = line.strip()
+        if not stripped:
+            continue
+        if stripped.startswith("#"):
+            continue
+        tokens = stripped.split()
+
+        is_header = True
+        for tok in tokens:
+            try:
+                int(tok)
+            except ValueError:
+                is_header = False
+                break
+
+        if is_header:
+            col_indices = [int(tok) for tok in tokens]
+            continue
+
+        if col_indices is None:
+            raise ValueError(f"Invalid ${section_name} matrix block header")
+
+        try:
+            row_idx = int(tokens[0])
+        except ValueError as exc:
+            raise ValueError(f"Invalid ${section_name} row index: {tokens[0]!r}") from exc
+        values = [_parse_float(tok) for tok in tokens[1:]]
+
+        if len(values) != len(col_indices):
+            raise ValueError(
+                f"Invalid ${section_name} matrix row width for row {row_idx}: "
+                f"expected {len(col_indices)}, got {len(values)}"
+            )
+
+        for col_idx, value in zip(col_indices, values):
+            if row_idx < 0 or row_idx >= n_rows:
+                raise ValueError(f"Invalid ${section_name} matrix row index: {row_idx}")
+            if col_idx < 0 or col_idx >= n_cols:
+                raise ValueError(f"Invalid ${section_name} matrix column index: {col_idx}")
+            matrix[row_idx, col_idx] = value
+            filled[row_idx, col_idx] = True
+
+    if not np.all(filled):
+        raise ValueError(f"Incomplete ${section_name} matrix data")
+
+    return matrix
+
+
+def parse_orca_hess_data(filepath: str | Path) -> HessData:
+    filepath = Path(filepath)
+    sections = _parse_orca_hess_sections(filepath.read_text())
+
+    atom_lines = [
+        line.strip()
+        for line in sections.get("atoms", [])
+        if line.strip() and not line.strip().startswith("#")
+    ]
+    if not atom_lines:
+        raise ValueError("ORCA Hessian file missing $atoms section")
+
+    try:
+        n_atoms = int(atom_lines[0].split()[0])
+    except (IndexError, ValueError) as exc:
+        raise ValueError("Invalid $atoms atom-count line in ORCA Hessian file") from exc
+
+    if len(atom_lines) < n_atoms + 1:
+        raise ValueError("Incomplete $atoms section in ORCA Hessian file")
+
+    atoms: list[Atom] = []
+    for atom_line in atom_lines[1 : n_atoms + 1]:
+        parts = atom_line.split()
+        if len(parts) < 4:
+            raise ValueError("Invalid $atoms entry in ORCA Hessian file")
+        symbol = parts[0]
+        x, y, z = (_parse_float(parts[-3]), _parse_float(parts[-2]), _parse_float(parts[-1]))
+        coords = np.array([x, y, z], dtype=np.float64) * BOHR_TO_ANGSTROM
+        atoms.append(Atom(element=get_element(symbol), position=coords))
+
+    molecule = Molecule(atoms=atoms, bonds=[])
+    molecule.detect_bonds()
+
+    frequencies: np.ndarray | None = None
+    freq_lines = [
+        line.strip()
+        for line in sections.get("vibrational_frequencies", [])
+        if line.strip() and not line.strip().startswith("#")
+    ]
+    if freq_lines:
+        try:
+            n_freq = int(freq_lines[0].split()[0])
+        except (IndexError, ValueError) as exc:
+            raise ValueError("Invalid $vibrational_frequencies count in ORCA Hessian file") from exc
+        parsed_freqs: list[float] = []
+        for line in freq_lines[1:]:
+            parts = line.split()
+            if len(parts) == 1:
+                parsed_freqs.append(_parse_float(parts[0]))
+            else:
+                parsed_freqs.append(_parse_float(parts[1]))
+            if len(parsed_freqs) >= n_freq:
+                break
+        if len(parsed_freqs) < n_freq:
+            raise ValueError("Incomplete $vibrational_frequencies section in ORCA Hessian file")
+        frequencies = np.array(parsed_freqs[:n_freq], dtype=np.float64)
+
+    normal_modes: np.ndarray | None = None
+    mode_lines = [
+        line.strip()
+        for line in sections.get("normal_modes", [])
+        if line.strip() and not line.strip().startswith("#")
+    ]
+    if mode_lines:
+        dims = mode_lines[0].split()
+        if len(dims) < 2:
+            raise ValueError("Invalid $normal_modes dimensions in ORCA Hessian file")
+        try:
+            n_rows = int(dims[0])
+            n_cols = int(dims[1])
+        except ValueError as exc:
+            raise ValueError("Invalid $normal_modes dimensions in ORCA Hessian file") from exc
+
+        if n_rows != 3 * n_atoms:
+            raise ValueError(
+                "ORCA Hessian normal modes do not match atom count "
+                f"(rows={n_rows}, expected={3 * n_atoms})"
+            )
+
+        mode_matrix = _parse_orca_hess_block_matrix(mode_lines[1:], n_rows, n_cols, "normal_modes")
+        normal_modes = mode_matrix.T.reshape(n_cols, n_atoms, 3) * BOHR_TO_ANGSTROM
+        if frequencies is not None:
+            frequencies = frequencies[: normal_modes.shape[0]]
+
+    return HessData(
+        molecule=molecule,
+        frequencies=frequencies,
+        normal_modes=normal_modes,
+    )
+
+
 def parse_xyz(filepath: str | Path) -> Molecule:
+    return parse_xyz_trajectory(filepath).molecule
+
+
+def parse_xyz_trajectory(filepath: str | Path) -> XYZTrajectory:
     filepath = Path(filepath)
     with open(filepath) as f:
         lines = f.readlines()
 
-    n_atoms = int(lines[0].strip())
-    # line 1 is comment, skip
-    atoms = []
-    for line in lines[2 : 2 + n_atoms]:
-        parts = line.split()
-        symbol = parts[0]
-        x, y, z = float(parts[1]), float(parts[2]), float(parts[3])
-        atoms.append(Atom(element=get_element(symbol), position=np.array([x, y, z])))
+    frames: list[np.ndarray] = []
+    symbols_ref: list[str] | None = None
+    idx = 0
+    while idx < len(lines):
+        while idx < len(lines) and not lines[idx].strip():
+            idx += 1
+        if idx >= len(lines):
+            break
 
+        try:
+            n_atoms = int(lines[idx].strip())
+        except ValueError as exc:
+            raise ValueError(f"Invalid XYZ frame header at line {idx + 1}") from exc
+        frame_start = idx + 2
+        frame_end = frame_start + n_atoms
+        if frame_end > len(lines):
+            raise ValueError("Unexpected end of XYZ file while reading frame atoms")
+
+        frame_symbols: list[str] = []
+        frame_coords: list[list[float]] = []
+        for line in lines[frame_start:frame_end]:
+            parts = line.split()
+            if len(parts) < 4:
+                raise ValueError("Invalid XYZ atom line; expected: <symbol> <x> <y> <z>")
+            frame_symbols.append(parts[0])
+            frame_coords.append([float(parts[1]), float(parts[2]), float(parts[3])])
+
+        if symbols_ref is None:
+            symbols_ref = frame_symbols
+        else:
+            if len(frame_symbols) != len(symbols_ref):
+                raise ValueError("All XYZ frames must have the same atom count")
+            if frame_symbols != symbols_ref:
+                raise ValueError("All XYZ frames must preserve atom ordering and symbols")
+
+        frames.append(np.array(frame_coords, dtype=np.float64))
+        idx = frame_end
+
+    if not frames or symbols_ref is None:
+        raise ValueError("Empty XYZ file")
+
+    first_frame = frames[0]
+    atoms = [
+        Atom(element=get_element(symbol), position=first_frame[i].copy())
+        for i, symbol in enumerate(symbols_ref)
+    ]
     mol = Molecule(atoms=atoms, bonds=[])
     mol.detect_bonds()
-    return mol
+    return XYZTrajectory(molecule=mol, frames=np.stack(frames, axis=0))
 
 
 def parse_cube(filepath: str | Path) -> Molecule:
@@ -266,6 +485,8 @@ def load_molecule(filepath: str | Path) -> Molecule:
         from .molden import parse_molden_atoms
 
         return parse_molden_atoms(filepath)
+    elif suffix == ".hess":
+        return parse_orca_hess_data(filepath).molecule
     elif suffix in (".zmat", ".zmatrix"):
         return parse_zmat(filepath)
     elif suffix == ".gbw":
@@ -274,4 +495,6 @@ def load_molecule(filepath: str | Path) -> Molecule:
             "Use: moltui <file.gbw>"
         )
     else:
-        raise ValueError(f"Unsupported file format: {suffix}. Use .xyz, .cube, .molden, or .gbw")
+        raise ValueError(
+            f"Unsupported file format: {suffix}. Use .xyz, .cube, .molden, .hess, or .gbw"
+        )
