@@ -10,6 +10,7 @@ from rich.style import Style
 from textual.app import App, ComposeResult
 from textual.binding import Binding
 from textual.containers import Horizontal
+from textual.css.query import NoMatches
 from textual.events import Key
 from textual.strip import Strip
 from textual.widget import Widget
@@ -486,6 +487,13 @@ class MoltuiApp(App):
     def _update_title(self) -> None:
         self.title = self._title_text()
 
+    def _query_molecule_view(self) -> MoleculeView | None:
+        """Return MoleculeView when mounted, otherwise None during teardown."""
+        try:
+            return self.query_one(MoleculeView)
+        except NoMatches:
+            return None
+
     def _has_animation(self) -> bool:
         if self.trajectory_data is not None and self.trajectory_data.frames.shape[0] > 1:
             return True
@@ -548,10 +556,18 @@ class MoltuiApp(App):
 
         for i, atom in enumerate(self.molecule.atoms):
             atom.position = coords[i].copy()
-        view = self.query_one(MoleculeView)
+        view = self._query_molecule_view()
+        if view is None:
+            # Timer callbacks can race with app teardown in tests/CI.
+            self._stop_playback()
+            return
         view._invalidate_cache()
         if self._view_mode == _VIEW_GEOMETRY:
-            self.query_one(GeometryPanel).refresh_measurements()
+            try:
+                self.query_one(GeometryPanel).refresh_measurements()
+            except NoMatches:
+                self._stop_playback()
+                return
         self._update_title()
 
     def _reset_normal_mode_geometry(self) -> None:
@@ -560,7 +576,9 @@ class MoltuiApp(App):
         self.normal_mode_data.phase = 0.0
         for i, atom in enumerate(self.molecule.atoms):
             atom.position = self.normal_mode_data.equilibrium_coords[i].copy()
-        view = self.query_one(MoleculeView)
+        view = self._query_molecule_view()
+        if view is None:
+            return
         view._invalidate_cache()
         self._update_title()
 

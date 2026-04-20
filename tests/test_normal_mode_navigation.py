@@ -345,6 +345,40 @@ async def test_mode_specific_actions_disabled_outside_active_mode() -> None:
 
 
 @pytest.mark.asyncio
+async def test_animation_tick_safe_after_app_unmount() -> None:
+    _install_skimage_stub()
+
+    from moltui.app import MoltuiApp, NormalModeData
+    from moltui.elements import Atom, Molecule, get_element
+
+    atoms = [
+        Atom(get_element("O"), np.array([0.0, 0.0, 0.0])),
+        Atom(get_element("H"), np.array([0.9, 0.0, 0.0])),
+        Atom(get_element("H"), np.array([-0.3, 0.8, 0.0])),
+    ]
+    molecule = Molecule(atoms=atoms, bonds=[])
+    molecule.detect_bonds()
+    normal_mode_data = NormalModeData(
+        equilibrium_coords=np.array([a.position.copy() for a in atoms]),
+        mode_vectors=np.zeros((3, len(atoms), 3), dtype=np.float64),
+        frequencies=np.array([2000.0, 4000.0, 4700.0]),
+    )
+    app = MoltuiApp(
+        molecule=molecule,
+        filepath="sample.molden",
+        normal_mode_data=normal_mode_data,
+    )
+
+    async with app.run_test() as pilot:
+        app.action_toggle_normal_mode_panel()
+        await pilot.pause()
+        assert app._is_playing
+
+    # Simulate a late timer callback that fires after widgets are unmounted.
+    app._animation_tick()
+
+
+@pytest.mark.asyncio
 async def test_brackets_and_space_control_multixyz_frames_in_geometry_mode() -> None:
     _install_skimage_stub()
 
