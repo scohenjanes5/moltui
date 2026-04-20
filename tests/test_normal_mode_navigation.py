@@ -343,3 +343,27 @@ async def test_mode_specific_actions_disabled_outside_active_mode() -> None:
         await pilot.press("m")  # move to normal mode
         await pilot.pause()
         assert app.check_action("next_mo", tuple()) is False
+
+
+@pytest.mark.asyncio
+async def test_sidebar_table_has_initial_focus_on_open() -> None:
+    _install_skimage_stub()
+
+    from moltui.app import MoleculeView, MoltuiApp
+    from moltui.elements import Atom, Molecule, get_element
+
+    atoms = [
+        Atom(get_element("O"), np.array([0.0, 0.0, 0.0])),
+        Atom(get_element("H"), np.array([0.9, 0.0, 0.0])),
+        Atom(get_element("H"), np.array([-0.3, 0.8, 0.0])),
+    ]
+    molecule = Molecule(atoms=atoms, bonds=[])
+    molecule.detect_bonds()
+    app = MoltuiApp(molecule=molecule, filepath="sample.xyz")
+
+    async with app.run_test() as pilot:
+        await pilot.pause()
+        table = app._active_panel_table()
+        assert table is not None
+        assert table.has_focus
+        assert not app.query_one(MoleculeView).has_focus

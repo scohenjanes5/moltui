@@ -65,6 +65,10 @@ class SelectionTablePanel(Widget):
     def on_data_table_row_highlighted(self, event: DataTable.RowHighlighted) -> None:
         if self._populating or not self.has_class("visible"):
             return
+        # Ignore highlights from unfocused tables; programmatic cursor updates can
+        # fire highlight events and should not drive selection feedback loops.
+        if not event.data_table.has_focus:
+            return
         if event.row_key is None or event.row_key.value is None:
             return
         self.post_message(self._selection_message(int(event.row_key.value)))

@@ -13,7 +13,7 @@ from textual.containers import Horizontal
 from textual.events import Key
 from textual.strip import Strip
 from textual.widget import Widget
-from textual.widgets import DataTable, Footer, Header, TabbedContent
+from textual.widgets import DataTable, Footer, Header, RadioSet, TabbedContent
 
 from .elements import Molecule
 from .geometry_panel import GeometryPanel
@@ -28,7 +28,7 @@ from .parsers import (
     parse_orca_hess_data,
     parse_xyz_trajectory,
 )
-from .visual_panel import VisualPanel
+from .visual_panel import Slider, VisualPanel
 
 # Braille dot positions: each cell is 2 wide x 4 tall
 # Bit layout for Unicode braille (U+2800 + bits):
@@ -321,6 +321,8 @@ class MoltuiApp(App):
         Binding("d", "prev_animation_step", "Step-", show=False),
         Binding("x", "next_mode", "Mode+", show=False),
         Binding("z", "prev_mode", "Mode-", show=False),
+        Binding("tab", "tab_forward", show=False, priority=True),
+        Binding("shift+tab", "tab_backward", show=False, priority=True),
     ]
 
     def __init__(
@@ -393,7 +395,6 @@ class MoltuiApp(App):
             )
         initial_mode = self._available_view_modes()[0]
         self._set_view_mode(initial_mode, reveal_panel=True)
-        view.focus()
 
     def _panel_is_open(self) -> bool:
         return (
@@ -435,6 +436,10 @@ class MoltuiApp(App):
                 return False
         if action in ("panel_next", "panel_prev"):
             if not self._panel_is_open():
+                return False
+        if action in ("tab_forward", "tab_backward"):
+            geom = self.query_one(GeometryPanel)
+            if not geom.has_class("visible"):
                 return False
         if action in ("cycle_view_mode_next", "cycle_view_mode_prev"):
             if len(self._available_view_modes()) <= 1 and not self._panel_hidden:
@@ -788,6 +793,18 @@ class MoltuiApp(App):
         self.query_one(NormalModePanel).select_mode(prev_idx)
         self._apply_active_animation_geometry()
 
+    def action_tab_forward(self) -> None:
+        """Handle Tab without enabling global focus cycling."""
+        geom = self.query_one(GeometryPanel)
+        if geom.has_class("visible"):
+            geom.action_next_tab()
+
+    def action_tab_backward(self) -> None:
+        """Handle Shift+Tab without enabling global focus cycling."""
+        geom = self.query_one(GeometryPanel)
+        if geom.has_class("visible"):
+            geom.action_prev_tab()
+
     def action_export_png(self) -> None:
         view = self.query_one(MoleculeView)
         if view.molecule is None:
@@ -1048,6 +1065,7 @@ class MoltuiApp(App):
         self._close_panels()
         view = self.query_one(MoleculeView)
         if not was_visible:
+            has_isosurfaces = bool(self._isosurfaces)
             vis.set_state(
                 licorice=view.licorice,
                 vdw=view.vdw,
@@ -1058,13 +1076,14 @@ class MoltuiApp(App):
                 atom_scale=view.atom_scale,
                 bond_radius=view.bond_radius,
                 isovalue=self.isovalue,
-                has_isosurfaces=bool(self._isosurfaces),
+                has_isosurfaces=has_isosurfaces,
             )
             vis.add_class("visible")
-            for child in vis.query("*"):
-                if child.can_focus:
-                    child.focus()
-                    break
+            if has_isosurfaces:
+                focus_target = vis.query_one("#slider-isovalue", Slider)
+            else:
+                focus_target = vis.query_one(RadioSet)
+            self.call_after_refresh(self.set_focus, focus_target)
         else:
             view.focus()
         view._invalidate_cache()
