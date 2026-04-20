@@ -45,6 +45,42 @@ def _write_cube(tmp_path: Path, name: str = "sample.cube") -> Path:
     return path
 
 
+def _write_orca_hess(tmp_path: Path, name: str = "sample.hess") -> Path:
+    path = tmp_path / name
+    normal_mode_rows = []
+    for i in range(9):
+        row = ["1.0" if i == j else "0.0" for j in range(9)]
+        normal_mode_rows.append(f"{i} " + " ".join(row))
+    path.write_text(
+        "\n".join(
+            [
+                "$atoms",
+                "3",
+                "O 15.999 0.000000 0.000000 0.000000",
+                "H 1.008 0.000000 1.430000 1.100000",
+                "H 1.008 0.000000 -1.430000 1.100000",
+                "$vibrational_frequencies",
+                "9",
+                "0 0.0",
+                "1 0.0",
+                "2 0.0",
+                "3 0.0",
+                "4 0.0",
+                "5 0.0",
+                "6 2041.3",
+                "7 4493.7",
+                "8 4796.3",
+                "$normal_modes",
+                "9 9",
+                "0 1 2 3 4 5 6 7 8",
+                *normal_mode_rows,
+                "",
+            ]
+        )
+    )
+    return path
+
+
 # --- XYZ parsing ---
 
 
@@ -183,8 +219,8 @@ class TestLoadMolecule:
         mol = load_molecule(cube_file)
         assert len(mol.atoms) > 0
 
-    def test_hess_dispatch(self):
-        hess_file = Path(__file__).resolve().parents[1] / "examples" / "orca" / "h2o.hess"
+    def test_hess_dispatch(self, tmp_path: Path):
+        hess_file = _write_orca_hess(tmp_path)
         mol = load_molecule(hess_file)
         assert len(mol.atoms) == 3
 
@@ -215,8 +251,8 @@ def test_load_xyz_smoke(tmp_path: Path):
         assert all(a.position.shape == (3,) for a in mol.atoms)
 
 
-def test_parse_orca_hess_data_includes_normal_modes() -> None:
-    hess_file = Path(__file__).resolve().parents[1] / "examples" / "orca" / "h2o.hess"
+def test_parse_orca_hess_data_includes_normal_modes(tmp_path: Path) -> None:
+    hess_file = _write_orca_hess(tmp_path)
     hess_data = parse_orca_hess_data(hess_file)
 
     assert len(hess_data.molecule.atoms) == 3
