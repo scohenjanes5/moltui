@@ -16,6 +16,22 @@ BOHR_TO_ANGSTROM = 0.529177249
 SHELL_LABEL_TO_L = {"s": 0, "p": 1, "d": 2, "f": 3, "g": 4}
 
 
+def _parse_float(token: str) -> float:
+    """Parse a float token, including Fortran D exponents."""
+    return float(token.replace("D", "E").replace("d", "e"))
+
+
+def _section_tag(line: str) -> str | None:
+    """Return normalized section tag from a line like '[Atoms] AU'."""
+    stripped = line.strip()
+    if not stripped.startswith("["):
+        return None
+    end = stripped.find("]")
+    if end < 0:
+        return None
+    return stripped[1:end].strip().lower()
+
+
 # ---------------------------------------------------------------------------
 # Data structures ------------------------------------------------------------
 # ---------------------------------------------------------------------------
@@ -75,16 +91,17 @@ def parse_molden(filepath: str | Path) -> MoldenBasis:
     is_angstrom = False
     while i < len(lines):
         line = lines[i]
+        tag = _section_tag(line)
 
         # --- [Atoms] section ---
-        if "[Atoms]" in line:
-            is_angstrom = "Angs" in line
+        if tag == "atoms":
+            is_angstrom = "angs" in line.lower()
             i += 1
-            while i < len(lines) and not lines[i].startswith("["):
+            while i < len(lines) and _section_tag(lines[i]) is None:
                 parts = lines[i].split()
                 if len(parts) >= 6:
                     atom_symbols.append(parts[0])
-                    x, y, z = float(parts[3]), float(parts[4]), float(parts[5])
+                    x, y, z = _parse_float(parts[3]), _parse_float(parts[4]), _parse_float(parts[5])
                     if is_angstrom:
                         x /= BOHR_TO_ANGSTROM
                         y /= BOHR_TO_ANGSTROM
@@ -94,9 +111,9 @@ def parse_molden(filepath: str | Path) -> MoldenBasis:
             continue
 
         # --- [GTO] section ---
-        if "[GTO]" in line:
+        if tag == "gto":
             i += 1
-            while i < len(lines) and not lines[i].startswith("["):
+            while i < len(lines) and _section_tag(lines[i]) is None:
                 parts = lines[i].split()
                 if len(parts) >= 2 and parts[0].isdigit():
                     atom_idx = int(parts[0]) - 1  # 1-based to 0-based
@@ -104,7 +121,7 @@ def parse_molden(filepath: str | Path) -> MoldenBasis:
                     # Read shells for this atom
                     while i < len(lines):
                         sline = lines[i].strip()
-                        if not sline or sline.startswith("["):
+                        if not sline or _section_tag(sline) is not None:
                             break
                         sparts = sline.split()
                         if len(sparts) >= 2 and sparts[0].isdigit():
@@ -113,40 +130,76 @@ def parse_molden(filepath: str | Path) -> MoldenBasis:
                         nprim = int(sparts[1])
                         exps = []
                         coeffs = []
+                        coeffs_p = []
                         for _ in range(nprim):
                             i += 1
                             pparts = lines[i].split()
-                            exps.append(float(pparts[0]))
-                            coeffs.append(float(pparts[1]))
+                            exps.append(_parse_float(pparts[0]))
+                            coeffs.append(_parse_float(pparts[1]))
+                            if shell_type == "sp":
+                                if len(pparts) < 3:
+                                    raise ValueError(
+                                        "Invalid [GTO] sp primitive line in Molden file"
+                                    )
+                                coeffs_p.append(_parse_float(pparts[2]))
                         i += 1
-                        l = SHELL_LABEL_TO_L[shell_type]
-                        shells.append(
-                            PrimShell(
-                                center=np.array(atom_coords[atom_idx]),
-                                l=l,
-                                exponents=np.array(exps),
-                                coefficients=np.array(coeffs),
+                        if shell_type == "sp":
+                            shells.append(
+                                PrimShell(
+                                    center=np.array(atom_coords[atom_idx]),
+                                    l=0,
+                                    exponents=np.array(exps),
+                                    coefficients=np.array(coeffs),
+                                )
                             )
-                        )
+                            shells.append(
+                                PrimShell(
+                                    center=np.array(atom_coords[atom_idx]),
+                                    l=1,
+                                    exponents=np.array(exps),
+                                    coefficients=np.array(coeffs_p),
+                                )
+                            )
+                        else:
+                            if shell_type not in SHELL_LABEL_TO_L:
+                                raise ValueError(
+                                    f"Unsupported shell type '{shell_type}' in [GTO] section"
+                                )
+                            l = SHELL_LABEL_TO_L[shell_type]
+                            shells.append(
+                                PrimShell(
+                                    center=np.array(atom_coords[atom_idx]),
+                                    l=l,
+                                    exponents=np.array(exps),
+                                    coefficients=np.array(coeffs),
+                                )
+                            )
                 else:
                     i += 1
             continue
 
         # --- Spherical/Cartesian flags ---
-        if "[5d]" in line or "[5D]" in line:
+        if tag == "5d":
             spherical[2] = True
-        if "[7f]" in line or "[7F]" in line:
             spherical[3] = True
-        if "[9g]" in line or "[9G]" in line:
+        if tag == "7f":
+            spherical[3] = True
+        if tag == "5d10f":
+            spherical[2] = True
+            spherical[3] = False
+        if tag == "5d7f":
+            spherical[2] = True
+            spherical[3] = True
+        if tag == "9g":
             spherical[4] = True
 
         # --- [MO] section ---
-        if "[MO]" in line:
+        if tag == "mo":
             i += 1
             current_coeffs: list[float] = []
             while i < len(lines):
                 mline = lines[i].strip()
-                if mline.startswith("["):
+                if _section_tag(mline) is not None:
                     break
                 if mline.startswith("Sym="):
                     if current_coeffs:
@@ -154,14 +207,14 @@ def parse_molden(filepath: str | Path) -> MoldenBasis:
                         current_coeffs = []
                     mo_symmetries.append(mline.split("=")[1].strip())
                 elif mline.startswith("Ene="):
-                    mo_energies.append(float(mline.split("=")[1].strip()))
+                    mo_energies.append(_parse_float(mline.split("=")[1].strip()))
                 elif mline.startswith("Spin="):
                     mo_spins.append(mline.split("=")[1].strip())
                 elif mline.startswith("Occup="):
-                    mo_occupations.append(float(mline.split("=")[1].strip()))
+                    mo_occupations.append(_parse_float(mline.split("=")[1].strip()))
                 elif mline and mline[0].isdigit():
                     parts = mline.split()
-                    current_coeffs.append(float(parts[1]))
+                    current_coeffs.append(_parse_float(parts[1]))
                 i += 1
             if current_coeffs:
                 mo_coeffs_list.append(current_coeffs)
@@ -236,6 +289,59 @@ def real_solid_harmonics(
     raise NotImplementedError(f"Angular momentum l={l} not implemented")
 
 
+def cartesian_harmonics(l: int, dx: np.ndarray, dy: np.ndarray, dz: np.ndarray) -> list[np.ndarray]:
+    """Return cartesian harmonic monomials in Molden's documented order."""
+    if l == 0:
+        return [np.ones_like(dx)]
+
+    if l == 1:
+        return [dx, dy, dz]
+
+    if l == 2:
+        return [dx * dx, dy * dy, dz * dz, dx * dy, dx * dz, dy * dz]
+
+    if l == 3:
+        xx = dx * dx
+        yy = dy * dy
+        zz = dz * dz
+        return [
+            xx * dx,  # xxx
+            yy * dy,  # yyy
+            zz * dz,  # zzz
+            dx * yy,  # xyy
+            xx * dy,  # xxy
+            xx * dz,  # xxz
+            dx * zz,  # xzz
+            dy * zz,  # yzz
+            yy * dz,  # yyz
+            dx * dy * dz,  # xyz
+        ]
+
+    if l == 4:
+        xx = dx * dx
+        yy = dy * dy
+        zz = dz * dz
+        return [
+            xx * xx,  # xxxx
+            yy * yy,  # yyyy
+            zz * zz,  # zzzz
+            xx * dx * dy,  # xxxy
+            xx * dx * dz,  # xxxz
+            yy * dy * dx,  # yyyx
+            yy * dy * dz,  # yyyz
+            zz * dz * dx,  # zzzx
+            zz * dz * dy,  # zzzy
+            xx * yy,  # xxyy
+            xx * zz,  # xxzz
+            yy * zz,  # yyzz
+            xx * dy * dz,  # xxyz
+            yy * dx * dz,  # yyxz
+            zz * dx * dy,  # zzxy
+        ]
+
+    raise NotImplementedError(f"Cartesian harmonics for l={l} not implemented")
+
+
 # ---------------------------------------------------------------------------
 # GTO normalization ----------------------------------------------------------
 # ---------------------------------------------------------------------------
@@ -291,6 +397,7 @@ class _PreparedShell:
     alphas: np.ndarray
     weighted_coeffs: np.ndarray  # c_k * N_k * cnorm
     ncomp: int
+    spherical: bool
 
 
 def _prepare_shells(
@@ -322,7 +429,12 @@ def _prepare_shells(
 
         prepared.append(
             _PreparedShell(
-                center_idx=cidx, l=l, alphas=shell.exponents, weighted_coeffs=wc, ncomp=ncomp
+                center_idx=cidx,
+                l=l,
+                alphas=shell.exponents,
+                weighted_coeffs=wc,
+                ncomp=ncomp,
+                spherical=is_sph,
             )
         )
 
@@ -382,7 +494,15 @@ def eval_gto(
         exps = np.exp(-shell.alphas[:, np.newaxis] * r2_active[np.newaxis, :])
         radial = shell.weighted_coeffs @ exps
 
-        harmonics = real_solid_harmonics(l, dr_active[:, 0], dr_active[:, 1], dr_active[:, 2])
+        if shell.spherical:
+            harmonics = real_solid_harmonics(l, dr_active[:, 0], dr_active[:, 1], dr_active[:, 2])
+        else:
+            harmonics = cartesian_harmonics(l, dr_active[:, 0], dr_active[:, 1], dr_active[:, 2])
+        if len(harmonics) != ncomp:
+            raise ValueError(
+                f"Harmonic component mismatch for l={l}: expected {ncomp}, got {len(harmonics)} "
+                f"(spherical={shell.spherical})"
+            )
 
         if mask is None:
             for m in range(ncomp):
