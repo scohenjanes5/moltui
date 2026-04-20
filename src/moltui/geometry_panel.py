@@ -182,7 +182,10 @@ class GeometryPanel(Widget):
 
     def _emit_current_highlight(self, dt: DataTable) -> None:
         """Emit highlight for the currently selected row in the given table."""
-        if not self.has_class("visible") or dt.row_count == 0:
+        if not self.has_class("visible"):
+            return
+        if dt.row_count == 0:
+            self.post_message(self.HighlightAtoms(()))
             return
         rk = list(dt.rows.keys())[dt.cursor_row]
         if rk.value is not None:
