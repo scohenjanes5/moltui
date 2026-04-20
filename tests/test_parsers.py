@@ -8,7 +8,13 @@ from pathlib import Path
 import numpy as np
 import pytest
 
-from moltui.parsers import load_molecule, parse_cube_data, parse_xyz, parse_xyz_trajectory
+from moltui.parsers import (
+    load_molecule,
+    parse_cube_data,
+    parse_orca_hess_data,
+    parse_xyz,
+    parse_xyz_trajectory,
+)
 
 
 def _write_xyz(tmp_path: Path, name: str, body: str) -> Path:
@@ -177,6 +183,11 @@ class TestLoadMolecule:
         mol = load_molecule(cube_file)
         assert len(mol.atoms) > 0
 
+    def test_hess_dispatch(self):
+        hess_file = Path(__file__).resolve().parents[1] / "examples" / "orca" / "h2o.hess"
+        mol = load_molecule(hess_file)
+        assert len(mol.atoms) == 3
+
     def test_unsupported_format_raises(self):
         with pytest.raises(ValueError, match="Unsupported"):
             load_molecule(Path("/fake/file.pdb"))
@@ -202,3 +213,14 @@ def test_load_xyz_smoke(tmp_path: Path):
         mol = parse_xyz(xyz_file)
         assert len(mol.atoms) > 0
         assert all(a.position.shape == (3,) for a in mol.atoms)
+
+
+def test_parse_orca_hess_data_includes_normal_modes() -> None:
+    hess_file = Path(__file__).resolve().parents[1] / "examples" / "orca" / "h2o.hess"
+    hess_data = parse_orca_hess_data(hess_file)
+
+    assert len(hess_data.molecule.atoms) == 3
+    assert hess_data.frequencies is not None
+    assert hess_data.normal_modes is not None
+    assert hess_data.frequencies.shape == (9,)
+    assert hess_data.normal_modes.shape == (9, 3, 3)

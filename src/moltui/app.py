@@ -21,7 +21,13 @@ from .image_renderer import render_scene, rotation_matrix
 from .isosurface import IsosurfaceMesh, extract_isosurfaces
 from .mo_panel import MOPanel
 from .normal_mode_panel import NormalModePanel
-from .parsers import CubeData, load_molecule, parse_cube_data, parse_xyz_trajectory
+from .parsers import (
+    CubeData,
+    load_molecule,
+    parse_cube_data,
+    parse_orca_hess_data,
+    parse_xyz_trajectory,
+)
 from .visual_panel import VisualPanel
 
 # Braille dot positions: each cell is 2 wide x 4 tall
@@ -1198,6 +1204,8 @@ def _detect_filetype(filepath: str) -> str:
     name_lower = path.name.lower()
     if suffix == ".gbw":
         return "gbw"
+    if suffix == ".hess":
+        return "hess"
     if suffix in (".zmat", ".zmatrix"):
         return "zmat"
     if suffix == ".molden" or name_lower.endswith(".molden.input"):
@@ -1209,6 +1217,8 @@ def _detect_filetype(filepath: str) -> str:
                 continue
             if "[molden format]" in stripped.lower():
                 return "molden"
+            if stripped.lower() == "$orca_hessian_file":
+                return "hess"
             try:
                 int(stripped)
                 return "xyz"
@@ -1265,7 +1275,9 @@ def run():
         prog="moltui",
         description="Terminal-based 3D molecular viewer",
     )
-    parser.add_argument("file", help="molecular structure file (XYZ, Cube, Molden, or ORCA .gbw)")
+    parser.add_argument(
+        "file", help="molecular structure file (XYZ, Cube, Molden, ORCA .hess, or ORCA .gbw)"
+    )
     parsed = parser.parse_args()
 
     filepath = parsed.file
@@ -1313,6 +1325,16 @@ def run():
                 current_mo = molden_data.homo_idx
                 cube_data = evaluate_mo(molden_data, current_mo)
                 isosurfaces = extract_isosurfaces(cube_data)
+        elif filetype == "hess":
+            hess_data = parse_orca_hess_data(filepath)
+            molecule = hess_data.molecule
+            if hess_data.normal_modes is not None:
+                eq_coords = np.array([atom.position.copy() for atom in molecule.atoms])
+                normal_mode_data = NormalModeData(
+                    equilibrium_coords=eq_coords,
+                    mode_vectors=hess_data.normal_modes,
+                    frequencies=hess_data.frequencies,
+                )
         elif filetype == "xyz":
             traj = parse_xyz_trajectory(filepath)
             molecule = traj.molecule
