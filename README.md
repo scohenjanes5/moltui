@@ -44,7 +44,7 @@ The modes consist of **molecular orbitals**, **normal modes** and **geometry** a
 
 ### Animations
 
-#### Multi-XYZ
+#### Trajectories
 
 **Trajectories** can be provided in the **multi-XYZ** file format (essentially multiple XYZ files concatenated together).
 **Toggle** a looping **animation** of the trajectory using `<space>` and **cycle** individual **frames** using `[` and `]`.
