@@ -8,8 +8,6 @@ import pytest
 from moltui.gto import eval_gto, parse_molden
 from moltui.molden import load_molden_data
 
-EXAMPLES_DIR = Path(__file__).resolve().parent.parent / "examples"
-
 
 def _write_molden(tmp_path: Path, contents: str) -> Path:
     path = tmp_path / "sample.molden"
@@ -191,9 +189,38 @@ Occup= 2.0
     assert ao.shape == (1, 9)
 
 
-def test_load_molden_data_rejects_normal_modes_only_file() -> None:
+def test_load_molden_data_rejects_normal_modes_only_file(tmp_path: Path) -> None:
     """Normal-modes-only Molden files should fail with a clear user message."""
-    path = EXAMPLES_DIR / "h2o_normalmodes.molden"
+    path = _write_molden(
+        tmp_path,
+        """[MOLDEN FORMAT]
+[N_FREQ]
+9
+[FREQ]
+0.0
+0.0
+0.0
+0.0
+0.0
+0.0
+1626.44
+3645.22
+3751.11
+[NATOM]
+3
+[FR-COORD]
+O -0.57 -0.43 0.30
+H -0.02 1.27 0.76
+H 0.60 -0.85 -1.06
+[FR-NORM-COORD]
+vibration 1
+0.0 0.0 0.0
+0.0 0.0 0.0
+0.0 0.0 0.0
+[INT]
+0.0
+""",
+    )
 
     with pytest.raises(
         ValueError,

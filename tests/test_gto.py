@@ -12,12 +12,61 @@ import pytest
 
 from moltui.gto import eval_gto, parse_molden
 
-EXAMPLES_DIR = Path(__file__).resolve().parent.parent / "examples"
+molden_tools = pytest.importorskip(
+    "pyscf.tools.molden",
+    reason="pyscf not installed — skipping GTO reference tests",
+)
 
-pyscf = pytest.importorskip("pyscf", reason="pyscf not installed — skipping GTO reference tests")
 
+def _write_reference_molden(tmp_path: Path) -> Path:
+    path = tmp_path / "reference.molden"
+    path.write_text(
+        """[Molden Format]
+[Atoms] AU
+H 1 1 0.0 0.0 0.0
+[GTO]
+1 0
+s 1 1.0
+1.24 1.0
+p 1 1.0
+0.75 1.0
 
-MOLDEN_FILES = [p.name for p in EXAMPLES_DIR.glob("*.molden")]
+[MO]
+Sym= A1
+Ene= -0.5
+Spin= Alpha
+Occup= 2.0
+1 1.0
+2 0.0
+3 0.0
+4 0.0
+Sym= A1
+Ene= -0.1
+Spin= Alpha
+Occup= 2.0
+1 0.0
+2 1.0
+3 0.0
+4 0.0
+Sym= A1
+Ene= 0.2
+Spin= Alpha
+Occup= 0.0
+1 0.0
+2 0.0
+3 1.0
+4 0.0
+Sym= A1
+Ene= 0.3
+Spin= Alpha
+Occup= 0.0
+1 0.0
+2 0.0
+3 0.0
+4 1.0
+"""
+    )
+    return path
 
 
 def _build_grid(coords_bohr: np.ndarray, grid_n: int = 60, padding: float = 5.0):
@@ -33,16 +82,13 @@ def _build_grid(coords_bohr: np.ndarray, grid_n: int = 60, padding: float = 5.0)
     return np.column_stack([xx.ravel(), yy.ravel(), zz.ravel()])
 
 
-@pytest.mark.parametrize("molden_file", MOLDEN_FILES)
-def test_ao_shape_matches_pyscf(molden_file: str) -> None:
+def test_ao_shape_matches_pyscf(tmp_path: Path) -> None:
     """Check that the AO matrix has the same shape as PySCF's."""
-    filepath = EXAMPLES_DIR / molden_file
+    filepath = _write_reference_molden(tmp_path)
 
     basis = parse_molden(filepath)
     grid_points = _build_grid(basis.atom_coords_bohr)
     ao_numpy = eval_gto(basis.shells, grid_points, basis.spherical)
-
-    from pyscf.tools import molden as molden_tools
 
     pyscf_mol = molden_tools.load(str(filepath))[0]
     ao_pyscf = pyscf_mol.eval_gto("GTOval_sph", grid_points)
@@ -52,15 +98,14 @@ def test_ao_shape_matches_pyscf(molden_file: str) -> None:
     )
 
 
-@pytest.mark.parametrize("molden_file", MOLDEN_FILES)
-def test_mo_values_match_pyscf(molden_file: str) -> None:
+def test_mo_values_match_pyscf(tmp_path: Path) -> None:
     """Check that MO values on a grid match PySCF for multiple orbitals.
 
     Individual AO column ordering may differ between our parser and PySCF,
     but the MO products (ao @ mo_coeff) must match since both use consistent
     AO/coefficient pairs from the same molden file.
     """
-    filepath = EXAMPLES_DIR / molden_file
+    filepath = _write_reference_molden(tmp_path)
 
     # NumPy
     basis = parse_molden(filepath)
@@ -68,8 +113,6 @@ def test_mo_values_match_pyscf(molden_file: str) -> None:
     ao_numpy = eval_gto(basis.shells, grid_points, basis.spherical)
 
     # PySCF
-    from pyscf.tools import molden as molden_tools
-
     result = molden_tools.load(str(filepath))
     pyscf_mol, pyscf_mo_coeff, pyscf_mo_occ = result[0], result[2], result[3]
     ao_pyscf = pyscf_mol.eval_gto("GTOval_sph", grid_points)

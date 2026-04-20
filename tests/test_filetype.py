@@ -3,47 +3,40 @@
 
 from __future__ import annotations
 
-import tempfile
 from pathlib import Path
 
 from moltui.app import _detect_filetype
 
-EXAMPLES_DIR = Path(__file__).resolve().parent.parent / "examples"
-
 
 class TestDetectFiletype:
-    def test_xyz_detected(self):
-        assert _detect_filetype(str(EXAMPLES_DIR / "water.xyz")) == "xyz"
+    def test_xyz_detected(self, tmp_path: Path):
+        path = tmp_path / "water.xyz"
+        path.write_text("3\nwater\nO 0 0 0\nH 0.758 0 0.504\nH -0.758 0 0.504\n")
+        assert _detect_filetype(str(path)) == "xyz"
 
-    def test_molden_detected(self):
-        molden_files = list(EXAMPLES_DIR.glob("*.molden"))
-        if not molden_files:
-            return
-        assert _detect_filetype(str(molden_files[0])) == "molden"
+    def test_molden_detected(self, tmp_path: Path):
+        path = tmp_path / "sample.molden"
+        path.write_text("[MOLDEN FORMAT]\n[Atoms] AU\nH 1 1 0.0 0.0 0.0\n")
+        assert _detect_filetype(str(path)) == "molden"
 
-    def test_cube_detected(self):
-        cube_files = list(EXAMPLES_DIR.glob("*.cube"))
-        if not cube_files:
-            return
-        assert _detect_filetype(str(cube_files[0])) == "cube"
+    def test_cube_detected(self, tmp_path: Path):
+        path = tmp_path / "sample.cube"
+        path.write_text("comment 1\ncomment 2\n2 0.0 0.0 0.0\n")
+        assert _detect_filetype(str(path)) == "cube"
 
     def test_gbw_by_extension(self):
         # .gbw detection is by extension, doesn't read content
-        with tempfile.NamedTemporaryFile(suffix=".gbw") as f:
-            assert _detect_filetype(f.name) == "gbw"
+        path = Path("fake.gbw")
+        assert _detect_filetype(str(path)) == "gbw"
 
-    def test_xyz_content_detection(self):
+    def test_xyz_content_detection(self, tmp_path: Path):
         """XYZ is detected by first non-empty line being an integer."""
-        with tempfile.NamedTemporaryFile(mode="w", suffix=".txt", delete=False) as f:
-            f.write("3\ncomment\nH 0 0 0\nH 1 0 0\nH 0 1 0\n")
-            f.flush()
-            assert _detect_filetype(f.name) == "xyz"
-            Path(f.name).unlink()
+        path = tmp_path / "molecule.txt"
+        path.write_text("3\ncomment\nH 0 0 0\nH 1 0 0\nH 0 1 0\n")
+        assert _detect_filetype(str(path)) == "xyz"
 
-    def test_molden_content_detection(self):
+    def test_molden_content_detection(self, tmp_path: Path):
         """Molden is detected by [Molden Format] marker."""
-        with tempfile.NamedTemporaryFile(mode="w", suffix=".txt", delete=False) as f:
-            f.write("[Molden Format]\n[Atoms] AU\n")
-            f.flush()
-            assert _detect_filetype(f.name) == "molden"
-            Path(f.name).unlink()
+        path = tmp_path / "molecule.txt"
+        path.write_text("[Molden Format]\n[Atoms] AU\n")
+        assert _detect_filetype(str(path)) == "molden"

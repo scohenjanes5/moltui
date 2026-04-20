@@ -10,36 +10,95 @@ import pytest
 
 from moltui.parsers import load_molecule, parse_cube_data, parse_xyz
 
-EXAMPLES_DIR = Path(__file__).resolve().parent.parent / "examples"
+
+def _write_xyz(tmp_path: Path, name: str, body: str) -> Path:
+    path = tmp_path / name
+    path.write_text(body)
+    return path
+
+
+def _write_cube(tmp_path: Path, name: str = "sample.cube") -> Path:
+    path = tmp_path / name
+    path.write_text(
+        "\n".join(
+            [
+                "Cube file",
+                "Generated for tests",
+                "2 0.0 0.0 0.0",
+                "2 1.0 0.0 0.0",
+                "2 0.0 1.0 0.0",
+                "2 0.0 0.0 1.0",
+                "8 0.0 0.0 0.0 0.0",
+                "1 0.0 0.0 0.0 1.8",
+                "0.1 0.2 0.3 0.4 0.5 0.6",
+                "0.7 0.8",
+                "",
+            ]
+        )
+    )
+    return path
 
 
 # --- XYZ parsing ---
 
 
 class TestParseXYZ:
-    def test_water(self):
-        mol = parse_xyz(EXAMPLES_DIR / "water.xyz")
+    def test_water(self, tmp_path: Path):
+        xyz = _write_xyz(
+            tmp_path,
+            "water.xyz",
+            "3\nwater\nO 0.0000 0.0000 0.0000\nH 0.7586 0.0000 0.5043\nH -0.7586 0.0000 0.5043\n",
+        )
+        mol = parse_xyz(xyz)
         assert len(mol.atoms) == 3
         symbols = [a.element.symbol for a in mol.atoms]
         assert "O" in symbols
         assert symbols.count("H") == 2
 
-    def test_aspirin_atom_count(self):
-        mol = parse_xyz(EXAMPLES_DIR / "aspirin.xyz")
+    def test_aspirin_atom_count(self, tmp_path: Path):
+        atom_lines = "\n".join(f"H {i * 0.7:.3f} 0.0 0.0" for i in range(21))
+        xyz = _write_xyz(tmp_path, "aspirin_like.xyz", f"21\nmock\n{atom_lines}\n")
+        mol = parse_xyz(xyz)
         assert len(mol.atoms) == 21
 
-    def test_bonds_detected(self):
-        mol = parse_xyz(EXAMPLES_DIR / "water.xyz")
+    def test_bonds_detected(self, tmp_path: Path):
+        xyz = _write_xyz(
+            tmp_path,
+            "water.xyz",
+            "3\nwater\nO 0.0000 0.0000 0.0000\nH 0.7586 0.0000 0.5043\nH -0.7586 0.0000 0.5043\n",
+        )
+        mol = parse_xyz(xyz)
         assert len(mol.bonds) > 0
 
-    def test_ethanol(self):
-        mol = parse_xyz(EXAMPLES_DIR / "ethanol.xyz")
+    def test_ethanol(self, tmp_path: Path):
+        xyz = _write_xyz(
+            tmp_path,
+            "ethanol.xyz",
+            (
+                "9\nethanol\n"
+                "C 0.000 0.000 0.000\n"
+                "C 1.520 0.000 0.000\n"
+                "O 2.020 1.200 0.000\n"
+                "H -0.540 0.900 0.000\n"
+                "H -0.540 -0.900 0.000\n"
+                "H 1.980 -0.900 0.000\n"
+                "H 1.980 0.500 0.900\n"
+                "H 1.980 0.500 -0.900\n"
+                "H 2.980 1.100 0.000\n"
+            ),
+        )
+        mol = parse_xyz(xyz)
         symbols = [a.element.symbol for a in mol.atoms]
         assert "C" in symbols
         assert "O" in symbols
 
-    def test_positions_are_float_arrays(self):
-        mol = parse_xyz(EXAMPLES_DIR / "water.xyz")
+    def test_positions_are_float_arrays(self, tmp_path: Path):
+        xyz = _write_xyz(
+            tmp_path,
+            "water.xyz",
+            "3\nwater\nO 0.0000 0.0000 0.0000\nH 0.7586 0.0000 0.5043\nH -0.7586 0.0000 0.5043\n",
+        )
+        mol = parse_xyz(xyz)
         for atom in mol.atoms:
             assert atom.position.shape == (3,)
             assert atom.position.dtype == np.float64
@@ -50,11 +109,9 @@ class TestParseXYZ:
 
 class TestParseCubeData:
     @pytest.fixture
-    def cube_data(self):
-        cube_files = list(EXAMPLES_DIR.glob("*.cube"))
-        if not cube_files:
-            pytest.skip("No .cube files in examples/")
-        return parse_cube_data(cube_files[0])
+    def cube_data(self, tmp_path: Path):
+        cube_file = _write_cube(tmp_path)
+        return parse_cube_data(cube_file)
 
     def test_molecule_has_atoms(self, cube_data):
         assert len(cube_data.molecule.atoms) > 0
@@ -75,15 +132,18 @@ class TestParseCubeData:
 
 
 class TestLoadMolecule:
-    def test_xyz_dispatch(self):
-        mol = load_molecule(EXAMPLES_DIR / "water.xyz")
+    def test_xyz_dispatch(self, tmp_path: Path):
+        xyz = _write_xyz(
+            tmp_path,
+            "water.xyz",
+            "3\nwater\nO 0.0000 0.0000 0.0000\nH 0.7586 0.0000 0.5043\nH -0.7586 0.0000 0.5043\n",
+        )
+        mol = load_molecule(xyz)
         assert len(mol.atoms) == 3
 
-    def test_cube_dispatch(self):
-        cube_files = list(EXAMPLES_DIR.glob("*.cube"))
-        if not cube_files:
-            pytest.skip("No .cube files in examples/")
-        mol = load_molecule(cube_files[0])
+    def test_cube_dispatch(self, tmp_path: Path):
+        cube_file = _write_cube(tmp_path)
+        mol = load_molecule(cube_file)
         assert len(mol.atoms) > 0
 
     def test_unsupported_format_raises(self):
@@ -98,11 +158,16 @@ class TestLoadMolecule:
 # --- Smoke test: load all example XYZ files ---
 
 
-XYZ_FILES = sorted(EXAMPLES_DIR.glob("*.xyz"))
-
-
-@pytest.mark.parametrize("xyz_file", XYZ_FILES, ids=lambda p: p.name)
-def test_load_xyz_smoke(xyz_file: Path):
-    mol = parse_xyz(xyz_file)
-    assert len(mol.atoms) > 0
-    assert all(a.position.shape == (3,) for a in mol.atoms)
+def test_load_xyz_smoke(tmp_path: Path):
+    xyz_files = [
+        _write_xyz(
+            tmp_path,
+            "water.xyz",
+            "3\nwater\nO 0.0 0.0 0.0\nH 0.7586 0.0 0.5043\nH -0.7586 0.0 0.5043\n",
+        ),
+        _write_xyz(tmp_path, "co2.xyz", "3\nco2\nO -1.16 0.0 0.0\nC 0.0 0.0 0.0\nO 1.16 0.0 0.0\n"),
+    ]
+    for xyz_file in xyz_files:
+        mol = parse_xyz(xyz_file)
+        assert len(mol.atoms) > 0
+        assert all(a.position.shape == (3,) for a in mol.atoms)

@@ -152,19 +152,35 @@ class TestRenderScene:
         assert hit.any()
 
 
-# --- Smoke test: render all example XYZ files ---
-
-EXAMPLES_DIR = Path(__file__).resolve().parent.parent / "examples"
-XYZ_FILES = sorted(EXAMPLES_DIR.glob("*.xyz"))
+# --- Smoke test: render temp XYZ files ---
 
 
-@pytest.mark.parametrize("xyz_file", XYZ_FILES, ids=lambda p: p.name)
-def test_render_xyz_smoke(xyz_file: Path):
+def _write_xyz(tmp_path: Path, name: str, body: str) -> Path:
+    path = tmp_path / name
+    path.write_text(body)
+    return path
+
+
+def test_render_xyz_smoke(tmp_path: Path):
     from moltui.parsers import parse_xyz
 
-    mol = parse_xyz(xyz_file)
-    rot = rotation_matrix(-0.2, -0.5, 0.0)
-    cam = max(4.0, mol.radius() * 3.0)
-    pixels, hit = render_scene(32, 24, mol, rot, cam, ssaa=1)
-    assert pixels.shape == (24, 32, 3)
-    assert hit.any()
+    xyz_files = [
+        _write_xyz(
+            tmp_path,
+            "water.xyz",
+            "3\nwater\nO 0.0 0.0 0.0\nH 0.7586 0.0 0.5043\nH -0.7586 0.0 0.5043\n",
+        ),
+        _write_xyz(
+            tmp_path,
+            "co2.xyz",
+            "3\nco2\nO -1.16 0.0 0.0\nC 0.0 0.0 0.0\nO 1.16 0.0 0.0\n",
+        ),
+    ]
+
+    for xyz_file in xyz_files:
+        mol = parse_xyz(xyz_file)
+        rot = rotation_matrix(-0.2, -0.5, 0.0)
+        cam = max(4.0, mol.radius() * 3.0)
+        pixels, hit = render_scene(32, 24, mol, rot, cam, ssaa=1)
+        assert pixels.shape == (24, 32, 3)
+        assert hit.any()

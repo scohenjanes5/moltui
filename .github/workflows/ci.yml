@@ -30,3 +30,25 @@ jobs:
 
       - name: Run test suite
         run: uv run pytest tests
+
+  tests-pyscf:
+    name: Tests with PySCF (Python 3.11)
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Set up uv
+        uses: astral-sh/setup-uv@v5
+
+      - name: Install project and test dependencies (with PySCF)
+        run: uv sync --extra test-pyscf
+
+      - name: Run PySCF comparison tests
+        run: uv run pytest tests/test_gto.py
