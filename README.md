@@ -89,14 +89,16 @@ Toggle between **light** and **dark** mode with `i`.
 
 | Format                | Geometry | Orbitals | Normal Modes |
 |-----------------------|:--------:|:--------:|:------------:|
-| **XYZ**               | ✓        |          |              |
-| Gaussian **ZMAT**     | ✓        |          |              |
-| Gaussian **Cube**     | ✓        | ✓        |              |
+| **XYZ**               | ✓        | —        | —            |
+| Gaussian **ZMAT**     | ✓        | —        | —            |
+| Gaussian **Cube**     | ✓        | ✓        | —            |
 | **Molden**            | ✓        | ✓        | ✓            |
 | Gaussian **.fchk**    | ✓        | ✓        | ✓            |
-| Orca **.GBW**¹        | ✓        | ✓        |              |
-| Orca **.hess**        | ✓        |          | ✓            |
-| **TrexIO**²           | ✓        | ✓        |              |
+| Orca **.GBW**¹        | ✓        | ✓        | —            |
+| Orca **.hess**        | ✓        | —        | ✓            |
+| **TrexIO**²           | ✓        | ✓        | —            |
+
+✓ supported; — not part of the file format
 
 ¹ Requires `orca_2mkl` in `PATH`
 
