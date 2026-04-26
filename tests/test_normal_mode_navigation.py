@@ -103,19 +103,21 @@ async def test_m_and_capital_m_cycle_view_modes() -> None:
         frequencies=np.array([2000.0, 4000.0, 4700.0]),
     )
 
-    molden_data = SimpleNamespace(
+    orbital_data = SimpleNamespace(
         mo_energies=np.array([-0.5]),
         mo_occupations=np.array([2.0]),
         mo_symmetries=["A1"],
         mo_spins=["Alpha"],
         n_mos=1,
         homo_idx=0,
+        has_mo_energies=True,
+        has_mo_occupations=True,
     )
 
     app = MoltuiApp(
         molecule=molecule,
         filepath="sample.molden",
-        molden_data=molden_data,
+        orbital_data=orbital_data,
         current_mo=0,
         normal_mode_data=normal_mode_data,
     )
@@ -222,19 +224,21 @@ async def test_mo_and_normal_mode_views_are_mutually_exclusive() -> None:
         frequencies=np.arange(9.0),
     )
 
-    molden_data = SimpleNamespace(
+    orbital_data = SimpleNamespace(
         mo_energies=np.array([-0.5]),
         mo_occupations=np.array([2.0]),
         mo_symmetries=["A1"],
         mo_spins=["Alpha"],
         n_mos=1,
         homo_idx=0,
+        has_mo_energies=True,
+        has_mo_occupations=True,
     )
 
     app = MoltuiApp(
         molecule=molecule,
         filepath="sample.molden",
-        molden_data=molden_data,
+        orbital_data=orbital_data,
         current_mo=0,
         normal_mode_data=normal_mode_data,
     )
@@ -273,19 +277,21 @@ async def test_header_shows_only_active_view_info() -> None:
         mode_vectors=np.zeros((3, len(atoms), 3), dtype=np.float64),
         frequencies=np.array([2000.0, 4000.0, 4700.0]),
     )
-    molden_data = SimpleNamespace(
+    orbital_data = SimpleNamespace(
         mo_energies=np.array([-0.5]),
         mo_occupations=np.array([2.0]),
         mo_symmetries=["A1"],
         mo_spins=["Alpha"],
         n_mos=1,
         homo_idx=0,
+        has_mo_energies=True,
+        has_mo_occupations=True,
     )
 
     app = MoltuiApp(
         molecule=molecule,
         filepath="sample.molden",
-        molden_data=molden_data,
+        orbital_data=orbital_data,
         current_mo=0,
         normal_mode_data=normal_mode_data,
     )
@@ -314,13 +320,15 @@ async def test_mode_specific_actions_disabled_outside_active_mode() -> None:
     ]
     molecule = Molecule(atoms=atoms, bonds=[])
     molecule.detect_bonds()
-    molden_data = SimpleNamespace(
+    orbital_data = SimpleNamespace(
         mo_energies=np.array([-0.5]),
         mo_occupations=np.array([2.0]),
         mo_symmetries=["A1"],
         mo_spins=["Alpha"],
         n_mos=1,
         homo_idx=0,
+        has_mo_energies=True,
+        has_mo_occupations=True,
     )
     normal_mode_data = NormalModeData(
         equilibrium_coords=np.array([a.position.copy() for a in atoms]),
@@ -330,7 +338,7 @@ async def test_mode_specific_actions_disabled_outside_active_mode() -> None:
     app = MoltuiApp(
         molecule=molecule,
         filepath="sample.molden",
-        molden_data=molden_data,
+        orbital_data=orbital_data,
         current_mo=0,
         normal_mode_data=normal_mode_data,
     )

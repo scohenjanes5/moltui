@@ -103,7 +103,7 @@ async def test_mo_table_half_page_and_boundary_navigation() -> None:
 
     molecule = _chain_molecule(3)
     n_mos = 40
-    molden_data = types.SimpleNamespace(
+    orbital_data = types.SimpleNamespace(
         molecule=molecule,
         mo_energies=np.linspace(-1.0, 1.0, n_mos, dtype=np.float64),
         mo_occupations=np.array(([2.0] * 20) + ([0.0] * 20), dtype=np.float64),
@@ -111,12 +111,14 @@ async def test_mo_table_half_page_and_boundary_navigation() -> None:
         mo_spins=["Alpha"] * n_mos,
         n_mos=n_mos,
         homo_idx=19,
+        has_mo_energies=True,
+        has_mo_occupations=True,
     )
     app = MoltuiApp(
         molecule=molecule,
         filepath="sample.molden",
-        molden_data=molden_data,
-        current_mo=molden_data.homo_idx,
+        orbital_data=orbital_data,
+        current_mo=orbital_data.homo_idx,
     )
     app._debounced_switch_mo = lambda: None
 

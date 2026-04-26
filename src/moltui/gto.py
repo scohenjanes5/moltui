@@ -48,8 +48,13 @@ class PrimShell:
 
 
 @dataclass
-class MoldenBasis:
-    """Parsed molden basis set and MO data (no PySCF objects)."""
+class GtoBasis:
+    """Contracted GTO shells, nuclear coordinates, and MO coefficients.
+
+    Field layout and AO/MO ordering follow the Molden file format (as from
+    :func:`parse_molden` and typical PySCF Molden exports). Other sources (e.g. TREXIO)
+    are mapped into this representation for :func:`eval_gto` and MO evaluation.
+    """
 
     atom_symbols: list[str]
     atom_coords_bohr: np.ndarray  # (natom, 3)
@@ -73,8 +78,8 @@ def _n_components(l: int, spherical: bool) -> int:
     return 2 * l + 1 if spherical else (l + 1) * (l + 2) // 2
 
 
-def parse_molden(filepath: str | Path) -> MoldenBasis:
-    """Parse a Molden file into atoms, basis, and MO data."""
+def parse_molden(filepath: str | Path) -> GtoBasis:
+    """Parse a Molden file into a :class:`GtoBasis`."""
     filepath = Path(filepath)
     lines = filepath.read_text().splitlines()
 
@@ -316,7 +321,7 @@ def parse_molden(filepath: str | Path) -> MoldenBasis:
     else:
         normal_modes_arr = None
 
-    return MoldenBasis(
+    return GtoBasis(
         atom_symbols=atom_symbols,
         atom_coords_bohr=coords_arr,
         shells=shells,
@@ -546,15 +551,22 @@ def _prepare_shells(
             _PreparedShell(
                 center_idx=cidx,
                 l=l,
-                alphas=shell.exponents,
-                weighted_coeffs=wc,
+                alphas=shell.exponents.astype(np.float32),
+                weighted_coeffs=wc.astype(np.float32),
                 ncomp=ncomp,
                 spherical=is_sph,
             )
         )
 
-    centers = np.array(centers_list)
+    centers = np.array(centers_list, dtype=np.float32)
     return prepared, centers
+
+
+def prepare_gto_cache(
+    shells: list[PrimShell], spherical: dict[int, bool]
+) -> tuple[list[_PreparedShell], np.ndarray]:
+    """Precompute shell normalization and center arrays for reuse across eval_gto calls."""
+    return _prepare_shells(shells, spherical)
 
 
 # Screening threshold: exp(-x) < 1e-15 when x > ~34.5
@@ -565,21 +577,30 @@ def eval_gto(
     shells: list[PrimShell],
     grid_points: np.ndarray,
     spherical: dict[int, bool],
+    prepared_cache: tuple[list[_PreparedShell], np.ndarray] | None = None,
 ) -> np.ndarray:
-    """Evaluate all AO basis functions on grid_points. Returns (npoints, nao).
+    """Evaluate all AO basis functions on grid_points. Returns (npoints, nao) float32.
 
     Uses precomputed norms, batched exp, shared centers, and screening.
+    Pass prepared_cache (from prepare_gto_cache) to skip recomputing shell
+    normalization on repeated calls for the same molecule.
     """
     npts = grid_points.shape[0]
 
-    prepared, centers = _prepare_shells(shells, spherical)
+    if prepared_cache is not None:
+        prepared, centers = prepared_cache
+    else:
+        prepared, centers = _prepare_shells(shells, spherical)
+
+    # Promote grid points to float32 so all arithmetic stays in float32
+    gp = grid_points.astype(np.float32, copy=False)
 
     # Displacements and squared distances for each unique center
-    dr_all = grid_points[np.newaxis, :, :] - centers[:, np.newaxis, :]  # (nc, npts, 3)
+    dr_all = gp[np.newaxis, :, :] - centers[:, np.newaxis, :]  # (nc, npts, 3)
     r2_all = np.sum(dr_all * dr_all, axis=2)  # (nc, npts)
 
     total_ao = sum(s.ncomp for s in prepared)
-    result = np.zeros((npts, total_ao))
+    result = np.zeros((npts, total_ao), dtype=np.float32)
 
     col = 0
     for shell in prepared:
